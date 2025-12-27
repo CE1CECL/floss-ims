@@ -57,7 +57,7 @@ class SipHandler(val ctxt: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    private val activeSubscription = subscriptionManager.activeSubscriptionInfoList[0]
+    private val activeSubscription = subscriptionManager.activeSubscriptionInfoList!![0]
     private val imei = telephonyManager.getDeviceId(activeSubscription.simSlotIndex)
     private val subId = activeSubscription.subscriptionId
     private val mcc = telephonyManager.simOperator.substring(0 until 3)
