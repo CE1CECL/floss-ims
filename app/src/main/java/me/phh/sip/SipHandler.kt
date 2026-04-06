@@ -42,16 +42,8 @@ class SipHandler(val ctxt: Context) {
 
     val myHandler = Handler(HandlerThread("PhhMmTelFeature").apply { start() }.looper)
     val myExecutor = Executor { p0 -> myHandler.post(p0) }
-    val imsMediaManager = ImsMediaManager(ctxt, myExecutor, object:
-        ImsMediaManager.OnConnectedCallback {
-        override fun onConnected() {
-            Rlog.d(TAG, "ImsMediaManager connected")
-        }
-
-        override fun onDisconnected() {
-            Rlog.d(TAG, "ImsMediaManager disconnected")
-        }
-    })
+    // ImsMediaManager removed: com.android.telephony.imsmedia is not installed on LineageOS
+    // and all ImsMediaManager call sites are disabled (if(false){}) anyway.
 
     private val subscriptionManager: SubscriptionManager
     private val telephonyManager: TelephonyManager
@@ -227,15 +219,21 @@ class SipHandler(val ctxt: Context) {
         val pcscf = if (pcscfs.isNotEmpty()) {
             pcscfs[0] as InetAddress
         } else {
-            Rlog.w(TAG, "Had no Pcscf Sever defined, aborting")
-            val t = try { InetAddress.getByName("ims.mnc${mnc}.mcc${mcc}.pub.3gppnetwork.org") } catch(t: Throwable) { null }
-            val t2 = try { InetAddress.getByName("ims.mnc${mnc}.mcc${mcc}.3gppnetwork.org") } catch(t: Throwable) { null }
-            Rlog.d(TAG, "Resolved $t and $t2")
-            //imsFailureCallback?.invoke()
-            //abandonnedBecauseOfNoPcscf = true
-            //return
-            // For annoying broken Vince's RIL that can't report Pcscf
-            InetAddress.getByName("2001:4c48:400:100::2") //,/2001:4c48:400::3:2
+            // RIL didn't provide P-CSCF via LinkProperties. Try standard 3GPP DNS discovery
+            // (TS 24.229 §5.1.2A): resolve the well-known IMS domain for this PLMN.
+            val dnsFallback =
+                try { InetAddress.getByName("ims.mnc${mnc}.mcc${mcc}.pub.3gppnetwork.org") } catch(t: Throwable) { null }
+                ?: try { InetAddress.getByName("ims.mnc${mnc}.mcc${mcc}.3gppnetwork.org") } catch(t: Throwable) { null }
+                ?: android.os.SystemProperties.get("persist.ims.pcscf_fallback", "").takeIf { it.isNotEmpty() }
+                    ?.let { try { InetAddress.getByName(it) } catch(t: Throwable) { null } }
+            if (dnsFallback != null) {
+                Rlog.w(TAG, "No P-CSCF from RIL, using fallback: $dnsFallback")
+                dnsFallback
+            } else {
+                Rlog.w(TAG, "No P-CSCF and all fallbacks failed, waiting for onLinkPropertiesChanged")
+                abandonnedBecauseOfNoPcscf = true
+                return
+            }
         }
 
         localAddr = lp.linkAddresses.map { it.address }.sortedBy { if(it is Inet6Address) 0 else 1 }.first()
@@ -289,14 +287,18 @@ class SipHandler(val ctxt: Context) {
             plainRegReply.headers["www-authenticate"]!![0].getAuthValues()
         require(wwwAuthenticateType == "Digest")
         val nonceB64 = wwwAuthenticateParams["nonce"]!!
+        // Use the realm from the 401 challenge for H1 and the Authorization realm= field,
+        // as required by RFC 2617. Carriers often differ from the subscriber's own realm.
+        val challengeRealm = wwwAuthenticateParams["realm"] ?: realm
 
         Rlog.d(TAG, "Requesting AKA challenge")
         val akaResult = sipAkaChallenge(telephonyManager, nonceB64)
+        // Use non-sess digest when server doesn't offer qop (no cnonce/nc in response).
         akaDigest =
-            if(requireNonsessAka)
+            if(requireNonsessAka || wwwAuthenticateParams["qop"] == null)
                 SipAkaDigest(
                     user = user,
-                    realm = realm,
+                    realm = challengeRealm,
                     uri = "sip:$realm",
                     nonceB64 = nonceB64,
                     opaque = wwwAuthenticateParams["opaque"],
@@ -306,7 +308,7 @@ class SipHandler(val ctxt: Context) {
             else
             SipAkaDigestSess(
                     user = user,
-                    realm = realm,
+                    realm = challengeRealm,
                     uri = "sip:$realm",
                     nonceB64 = nonceB64,
                     opaque = wwwAuthenticateParams["opaque"],
@@ -492,17 +494,27 @@ class SipHandler(val ctxt: Context) {
                     val pcscfs = linkProperties!!.javaClass.getMethod("getPcscfServers").invoke(linkProperties) as List<*>
                     Rlog.d(TAG, "Got pcscfs $pcscfs")
                     if(pcscfs.isNotEmpty() && abandonnedBecauseOfNoPcscf) {
-                        connect()
+                        // Switch to this network if it has P-CSCF (could be a different bearer)
+                        network = _network
+                        try {
+                            connect()
+                        } catch (e: Throwable) {
+                            Rlog.e(TAG, "connect() from onLinkPropertiesChanged failed: $e")
+                        }
                     }
                 }
 
                 override fun onAvailable(_network: Network) {
                     Rlog.d(TAG, "Got IMS network.")
-                    if (!this@SipHandler::network.isInitialized) {
+                    if (!this@SipHandler::network.isInitialized || abandonnedBecauseOfNoPcscf) {
                         network = _network
                         thread {
                             Thread.sleep(4000)
-                            connect()
+                            try {
+                                connect()
+                            } catch (e: Throwable) {
+                                Rlog.e(TAG, "connect() failed: $e")
+                            }
                         }
                     } else {
                         Rlog.d(TAG, "... don't try anything")
@@ -783,8 +795,6 @@ a=sendrecv
         callStopped.set(true)
         Rlog.d(TAG, "Cancelled call ${request.headers["call-id"]!![0]}")
 
-        currentCall?.imsMediaSession?.let { imsMediaManager.closeSession(it) }
-
         // We're supposed to add an additional answer SIP/2.0 487 Request Terminated
         onCancelledCall?.invoke(Object(), "", emptyMap())
         return 200
@@ -1010,7 +1020,6 @@ a=sendrecv
 
     fun terminateCall() {
         // IDK what packet do we send, but at least we're close rtp
-        currentCall?.imsMediaSession?.let { imsMediaManager.closeSession(it) }
         callStopped.set(true)
 
         onCancelledCall?.invoke(Object(), "", emptyMap())
@@ -1517,7 +1526,7 @@ a=des:qos mandatory local sendrecv
 a=des:qos mandatory remote sendrecv
 a=conf:qos remote sendrecv
 a=sendrecv
-                       """.trim().toByteArray()
+                       """.trim()).toByteArray()
 
             val myHeaders = commonHeaders + //Require: precondition
                 """
@@ -1545,62 +1554,8 @@ a=sendrecv
                 hasEarlyMedia = hasEarlyMedia,
             )
 
-            if(false) {
-                val fakeRtcpSocket = DatagramSocket(0, localAddr) //useless but annoying ImsMediaManager
-                imsMediaManager.openSession(
-                    rtpSocket, fakeRtcpSocket,
-                    ImsMediaSession.SESSION_TYPE_AUDIO,
-                    AudioConfig.Builder()
-                        .setCodecType(AudioConfig.CODEC_AMR)
-                        .setRxPayloadTypeNumber(amrTrack.toByte())
-                        .setTxPayloadTypeNumber(amrTrack.toByte())
-                        .setRemoteRtpAddress(
-                            InetSocketAddress(
-                                rtpRemoteAddr,
-                                rtpRemotePort.toInt()
-                            )
-                        )
-                        .setSamplingRateKHz(8)
-                        .setAmrParams(
-                            AmrParams.Builder()
-                                .setOctetAligned(false)
-                                .setAmrMode(AmrParams.AMR_MODE_7)
-                                .build()
-                        )
-                        .setMediaDirection(RtpConfig.MEDIA_DIRECTION_SEND_RECEIVE)
-                        .build(),
-                    myExecutor,
-                    object: AudioSessionCallback() {
-                        override fun onOpenSessionSuccess(session: ImsMediaSession) {
-                            Rlog.d(TAG, "Opened session $session")
-                            currentCall = Call(
-                                outgoing = false,
-                                amrTrack = amrTrack,
-                                amrTrackDesc = amrTrackDesc,
-                                dtmfTrack = dtmfTrack,
-                                dtmfTrackDesc = dtmfTrackDesc,
-                                callHeaders = myHeaders - "require" - "content-type" + "Supported: 100rel, replaces, timer".toSipHeadersMap(),
-                                rtpRemoteAddr = rtpRemoteAddr,
-                                rtpRemotePort = rtpRemotePort.toInt(),
-                                rtpSocket = rtpSocket,
-                                sdp = mySdp,
-                                imsMediaSession = session,
-                                hasEarlyMedia = hasEarlyMedia
-                            )
-                        }
-
-                        override fun onOpenSessionFailure(error: Int) {
-                            Rlog.d(TAG, "Failed to open session $error")
-                        }
-                        override fun onSessionClosed() {
-                            Rlog.d(TAG, "Session closed")
-                        }
-                    }
-                )
-            } else {
-                callDecodeThread()
-                callEncodeThread()
-            }
+            callDecodeThread()
+            callEncodeThread()
 
 
             synchronized(prAckWaitLock) {
