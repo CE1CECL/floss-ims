@@ -16,7 +16,6 @@ import android.telephony.Rlog
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
-import android.telephony.imsmedia.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -42,8 +41,6 @@ class SipHandler(val ctxt: Context) {
 
     val myHandler = Handler(HandlerThread("PhhMmTelFeature").apply { start() }.looper)
     val myExecutor = Executor { p0 -> myHandler.post(p0) }
-    // ImsMediaManager removed: com.android.telephony.imsmedia is not installed on LineageOS
-    // and all ImsMediaManager call sites are disabled (if(false){}) anyway.
 
     private val subscriptionManager: SubscriptionManager
     private val telephonyManager: TelephonyManager
@@ -221,6 +218,9 @@ class SipHandler(val ctxt: Context) {
         } else {
             // RIL didn't provide P-CSCF via LinkProperties. Try standard 3GPP DNS discovery
             // (TS 23.003 §13.2): resolve the well-known IMS domain for this PLMN.
+            // These are public DNS records so InetAddress.getByName() over any network works.
+            // NOTE: future e164.arpa (ENUM) lookups must use network.getAllByName() instead,
+            // as those records are only served by the carrier's IMS PDN DNS servers.
             val dnsFallback =
                 try { InetAddress.getByName("ims.mnc${mnc}.mcc${mcc}.pub.3gppnetwork.org") } catch(t: Throwable) { null }
                 ?: try { InetAddress.getByName("ims.mnc${mnc}.mcc${mcc}.3gppnetwork.org") } catch(t: Throwable) { null }
@@ -756,6 +756,7 @@ a=sendrecv
             rtpSocket = call.rtpSocket,
             sdp = request.body,
             hasEarlyMedia = call.hasEarlyMedia,
+            remoteContact = call.remoteContact,
             )
 
         val reply =
@@ -812,7 +813,7 @@ a=sendrecv
         val rtpRemotePort: Int,
         val rtpSocket: DatagramSocket,
         val hasEarlyMedia: Boolean,
-        val imsMediaSession: ImsMediaSession? = null
+        val remoteContact: String,
     )
 
 
@@ -1054,7 +1055,6 @@ a=sendrecv
         thread {
 
             val rtpSocket = DatagramSocket(0, localAddr)
-            val fakeRtcpSocket = DatagramSocket(0, localAddr) //useless but annoying ImsMediaManager
             network.bindSocket(rtpSocket)
             //rtpSocket.connect(rtpRemoteAddr, rtpRemotePort.toInt())
 
@@ -1265,48 +1265,6 @@ a=sendrecv
                     callEncodeThread()
                 }
 
-                   /* } else {
-                        imsMediaManager.openSession(
-                            rtpSocket, fakeRtcpSocket,
-                            ImsMediaSession.SESSION_TYPE_AUDIO,
-                            AudioConfig.Builder()
-                                .setCodecType(AudioConfig.CODEC_AMR)
-                                .setRxPayloadTypeNumber(amrTrack.toByte())
-                                .setTxPayloadTypeNumber(amrTrack.toByte())
-                                .setRemoteRtpAddress(InetSocketAddress(rtpRemoteAddr, rtpRemotePort.toInt()))
-                                .setSamplingRateKHz(8)
-                                .setAmrParams(AmrParams.Builder()
-                                    .setOctetAligned(false)
-                                    .setAmrMode(AmrParams.AMR_MODE_7)
-                                    .build())
-                                .setMediaDirection(RtpConfig.MEDIA_DIRECTION_SEND_RECEIVE)
-                                .build(),
-                            myExecutor,
-                            object: AudioSessionCallback() {
-                                override fun onOpenSessionSuccess(session: ImsMediaSession) {
-                                    Rlog.d(TAG, "Opened session $session")
-                                    currentCall = Call(
-                                        amrTrack = amrTrack,
-                                        amrTrackDesc = amrTrackDesc,
-                                        dtmfTrack = dtmfTrack,
-                                        dtmfTrackDesc = dtmfTrackDesc,
-                                        callHeaders = myHeaders - "require" - "content-type" + "Supported: precondition, 100rel, replaces, timer".toSipHeadersMap(),
-                                        rtpRemoteAddr = rtpRemoteAddr,
-                                        rtpRemotePort = rtpRemotePort.toInt(),
-                                        rtpSocket = rtpSocket,
-                                        sdp = resp.body,
-                                        imsMediaSession = session)
-                                }
-
-                                override fun onOpenSessionFailure(error: Int) {
-                                    Rlog.d(TAG, "Failed to open session $error")
-                                }
-                                override fun onSessionClosed() {
-                                    Rlog.d(TAG, "Session closed")
-                                }
-                            }
-                        )
-                    }*/
                 false // Return true when we want to stop receiving messages for that call
             }
             Rlog.d(TAG, "Sending $msg")
