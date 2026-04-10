@@ -105,6 +105,25 @@ PRODUCT_COPY_FILES += \
 </permissions>
 ```
 
+### `sepolicy/vendor/property.te`
+
+```
+vendor_internal_prop(vendor_ims_prop)
+```
+
+### `sepolicy/vendor/property_contexts`
+
+```
+# IMS
+vendor.ril.ims.                u:object_r:vendor_ims_prop:s0
+```
+
+### `sepolicy/vendor/sehradiomanager.te`
+
+```
+allow sehradiomanager vendor_ims_prop:property_service set;
+```
+
 ## Building with Gradle (development only)
 
 The public `android.jar` (API 33) stubs do not expose the internal IMS APIs. To build
