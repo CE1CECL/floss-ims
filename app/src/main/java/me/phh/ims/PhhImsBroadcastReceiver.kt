@@ -8,6 +8,7 @@ import android.telephony.Rlog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.io.IOException
 
 class PhhImsBroadcastReceiver : BroadcastReceiver() {
     companion object {
@@ -25,7 +26,18 @@ class PhhImsBroadcastReceiver : BroadcastReceiver() {
             // XXX take some lock until this comes back?
             // (not function return, but callback after notify)
             CoroutineScope(Dispatchers.IO).launch {
-                imsService.mmTelFeature?.getSipHandlerOrNull()?.register()
+                val sipHandler = imsService.mmTelFeature?.getSipHandlerOrNull()
+                try {
+                    sipHandler?.register()
+                } catch (e: IOException) {
+                    Rlog.w(TAG, "Periodic REGISTER failed (stale socket), reconnecting", e)
+                    try {
+                        sipHandler?.connect()
+                    } catch (e2: Throwable) {
+                        Rlog.e(TAG, "Reconnect after failed REGISTER also failed", e2)
+                        sipHandler?.imsFailureCallback?.invoke()
+                    }
+                }
             }
             return
         }
