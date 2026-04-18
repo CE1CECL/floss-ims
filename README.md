@@ -206,11 +206,15 @@ real ADC path.
 
 ## Current status
 
-Registation: somtimes works
-Incomming SMS: work
-Outgoing SMS: not tested
-Incomming Calls: droped after user accepts the call
-Outgoing Calls: work if you apply patches above
+**Registation**: somtimes works
+
+**Incomming SMS**: work
+
+**Outgoing SMS**: not tested
+
+**Incomming Calls**: droped after user accepts the call
+
+**Outgoing Calls**: work *with incomming and outgoing audio and UI showing the call*, if you apply patches above
 
 ## Building with Gradle
 
