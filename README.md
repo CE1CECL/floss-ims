@@ -204,6 +204,14 @@ real ADC path.
          }
 ```
 
+## Current status
+
+Registation: somtimes works
+Incomming SMS: work
+Outgoing SMS: not tested
+Incomming Calls: droped after user accepts the call
+Outgoing Calls: work if you apply patches above
+
 ## Building with Gradle
 
 The public `android.jar` (API 33) stubs do not expose the internal IMS APIs. To build
