@@ -13,3 +13,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Samsung HAL binaries and derived disassembly — not redistributable
+RE/binaries/
+RE/dumps/
