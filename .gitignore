@@ -13,6 +13,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+app-debug.apk
 
 # Samsung HAL binaries and derived disassembly — not redistributable
 RE/binaries/

@@ -1,4 +1,4 @@
-//SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0
 package me.phh.sip
 
 import android.annotation.SuppressLint
@@ -34,7 +34,9 @@ private data class smsHeaders(
     val cseq: String,
 )
 
-class SipHandler(val ctxt: Context) {
+class SipHandler(
+    val ctxt: Context,
+) {
     companion object {
         private const val TAG = "PHH SipHandler"
     }
@@ -46,6 +48,7 @@ class SipHandler(val ctxt: Context) {
     private val telephonyManager: TelephonyManager
     private val connectivityManager: ConnectivityManager
     private val ipSecManager: IpSecManager
+
     init {
         subscriptionManager = ctxt.getSystemService(SubscriptionManager::class.java)
         telephonyManager = ctxt.getSystemService(TelephonyManager::class.java)
@@ -64,22 +67,32 @@ class SipHandler(val ctxt: Context) {
 
     /* Carrier specific settings
      */
-    val isControlSocketUdp = when(mcc + mnc) {
-        "450006" -> true // LG U+ can only do UDP
-        "208010" -> true // 20810 can do TCP and UDP. use this for testing
-        else -> false
-    }
-    val forceSmsc = when(mcc + mnc) {
-        "450006" -> "821080010585" // LG U+
-        else -> null
-    }
-    // Sess is more secure so default to it
-    val requireNonsessAka = when(mcc + mnc) {
-        "450006" -> true
-        else -> false
-    }
+    val isControlSocketUdp =
+        when (mcc + mnc) {
+            "450006" -> true
 
-    //private val realm = "ims.mnc$mnc.mcc$mcc.3gppnetwork.org"
+            // LG U+ can only do UDP
+            "208010" -> true
+
+            // 20810 can do TCP and UDP. use this for testing
+            else -> false
+        }
+    val forceSmsc =
+        when (mcc + mnc) {
+            "450006" -> "821080010585"
+
+            // LG U+
+            else -> null
+        }
+
+    // Sess is more secure so default to it
+    val requireNonsessAka =
+        when (mcc + mnc) {
+            "450006" -> true
+            else -> false
+        }
+
+    // private val realm = "ims.mnc$mnc.mcc$mcc.3gppnetwork.org"
     private val realm = "ims.mnc$mnc.mcc$mcc.3gppnetwork.org"
     private val user = "$imsi@$realm"
     private var akaDigest =
@@ -89,6 +102,7 @@ class SipHandler(val ctxt: Context) {
         val callId = randomBytes(12).toHex()
         return mapOf("call-id" to listOf(callId))
     }
+
     private var registerCounter = 1
     private var registerHeaders =
         """
@@ -101,8 +115,8 @@ class SipHandler(val ctxt: Context) {
     private var myTel = ""
 
     // too many lateinit, bad separation?
-    lateinit private var localAddr: InetAddress
-    lateinit private var pcscfAddr: InetAddress
+    private lateinit var localAddr: InetAddress
+    private lateinit var pcscfAddr: InetAddress
 
     data class SipIpsecSettings(
         val clientSpiC: IpSecManager.SecurityParameterIndex,
@@ -110,14 +124,15 @@ class SipHandler(val ctxt: Context) {
         val serverSpiC: IpSecManager.SecurityParameterIndex? = null,
         val serverSpiS: IpSecManager.SecurityParameterIndex? = null,
     )
+
     lateinit var ipsecSettings: SipIpsecSettings
 
-    lateinit private var network: Network
+    private lateinit var network: Network
 
-    lateinit private var plainSocket: SipConnection
-    lateinit private var socket: SipConnection
-    lateinit private var serverSocket: SipConnectionTcpServer
-    lateinit private var serverSocketUdp: SipConnectionUdpServer
+    private lateinit var plainSocket: SipConnection
+    private lateinit var socket: SipConnection
+    private lateinit var serverSocket: SipConnectionTcpServer
+    private lateinit var serverSocketUdp: SipConnectionUdpServer
     private var reliableSequenceCounter = 67
 
     private val cbLock = ReentrantLock()
@@ -138,14 +153,24 @@ class SipHandler(val ctxt: Context) {
     private var smsToken = 0
     private val smsHeadersMap = mutableMapOf<Int, smsHeaders>()
 
-    fun setRequestCallback(method: SipMethod, cb: (SipRequest) -> Int) {
+    fun setRequestCallback(
+        method: SipMethod,
+        cb: (SipRequest) -> Int,
+    ) {
         cbLock.withLock { requestCallbacks += (method to cb) }
     }
-    fun setResponseCallback(callId: String, cb: (SipResponse) -> Boolean) {
+
+    fun setResponseCallback(
+        callId: String,
+        cb: (SipResponse) -> Boolean,
+    ) {
         cbLock.withLock { responseCallbacks += (callId to cb) }
     }
 
-    fun parseMessage(reader: SipReader, writer: OutputStream): Boolean {
+    fun parseMessage(
+        reader: SipReader,
+        writer: OutputStream,
+    ): Boolean {
         val msg =
             try {
                 reader.parseMessage()
@@ -173,15 +198,22 @@ class SipHandler(val ctxt: Context) {
         if (requestCb != null) {
             status = requestCb(msg)
         }
-        if(status == 0) return true
+        if (status == 0) return true
         val reply =
             SipResponse(
                 statusCode = status,
-                statusString = if (status == 200) "OK" else if (status == 100) "Trying" else "ERROR",
+                statusString =
+                    if (status == 200) {
+                        "OK"
+                    } else if (status == 100) {
+                        "Trying"
+                    } else {
+                        "ERROR"
+                    },
                 headersParam =
                     msg.headers.filter { (k, _) ->
                         k in listOf("cseq", "via", "from", "to", "call-id")
-                    }
+                    },
             )
         Rlog.d(TAG, "Replying back with $reply")
         synchronized(writer) { writer.write(reply.toByteArray()) }
@@ -209,61 +241,92 @@ class SipHandler(val ctxt: Context) {
     }
 
     var abandonnedBecauseOfNoPcscf = false
+
     fun connect() {
         abandonnedBecauseOfNoPcscf = false
         Rlog.d(TAG, "Trying to connect to SIP server")
         val lp = connectivityManager.getLinkProperties(network)
         Rlog.d(TAG, "Got link properties $lp")
-        val pcscfs = (lp!!.javaClass.getMethod("getPcscfServers").invoke(lp) as List<*>).sortedBy { if(it is Inet6Address) 0 else 1 }
-        val pcscf = if (pcscfs.isNotEmpty()) {
-            pcscfs[0] as InetAddress
-        } else {
-            // RIL didn't provide P-CSCF via LinkProperties. Try standard 3GPP DNS discovery
-            // (TS 23.003 §13.2): resolve the well-known IMS domain for this PLMN.
-            // These are public DNS records so InetAddress.getByName() over any network works.
-            // NOTE: future e164.arpa (ENUM) lookups must use network.getAllByName() instead,
-            // as those records are only served by the carrier's IMS PDN DNS servers.
-            val dnsFallback =
-                try { InetAddress.getByName("ims.mnc${mnc}.mcc${mcc}.pub.3gppnetwork.org") } catch(t: Throwable) { null }
-                ?: try { InetAddress.getByName("ims.mnc${mnc}.mcc${mcc}.3gppnetwork.org") } catch(t: Throwable) { null }
-                ?: android.os.SystemProperties.get("persist.ims.pcscf_fallback", "").takeIf { it.isNotEmpty() }
-                    ?.let { try { InetAddress.getByName(it) } catch(t: Throwable) { null } }
-            if (dnsFallback != null) {
-                Rlog.w(TAG, "No P-CSCF from RIL, using fallback: $dnsFallback")
-                dnsFallback
+        val pcscfs = (lp!!.javaClass.getMethod("getPcscfServers").invoke(lp) as List<*>).sortedBy { if (it is Inet6Address) 0 else 1 }
+        val pcscf =
+            if (pcscfs.isNotEmpty()) {
+                pcscfs[0] as InetAddress
             } else {
-                Rlog.w(TAG, "No P-CSCF and all fallbacks failed, waiting for onLinkPropertiesChanged")
-                abandonnedBecauseOfNoPcscf = true
-                return
+                // RIL didn't provide P-CSCF via LinkProperties. Try standard 3GPP DNS discovery
+                // (TS 23.003 §13.2): resolve the well-known IMS domain for this PLMN.
+                // These are public DNS records so InetAddress.getByName() over any network works.
+                // NOTE: future e164.arpa (ENUM) lookups must use network.getAllByName() instead,
+                // as those records are only served by the carrier's IMS PDN DNS servers.
+                val dnsFallback =
+                    try {
+                        InetAddress.getByName("ims.mnc$mnc.mcc$mcc.pub.3gppnetwork.org")
+                    } catch (t: Throwable) {
+                        null
+                    }
+                        ?: try {
+                            InetAddress.getByName("ims.mnc$mnc.mcc$mcc.3gppnetwork.org")
+                        } catch (t: Throwable) {
+                            null
+                        }
+                        ?: android.os.SystemProperties
+                            .get("persist.ims.pcscf_fallback", "")
+                            .takeIf { it.isNotEmpty() }
+                            ?.let {
+                                try {
+                                    InetAddress.getByName(it)
+                                } catch (t: Throwable) {
+                                    null
+                                }
+                            }
+                if (dnsFallback != null) {
+                    Rlog.w(TAG, "No P-CSCF from RIL, using fallback: $dnsFallback")
+                    dnsFallback
+                } else {
+                    Rlog.w(TAG, "No P-CSCF and all fallbacks failed, waiting for onLinkPropertiesChanged")
+                    abandonnedBecauseOfNoPcscf = true
+                    return
+                }
             }
-        }
 
-        localAddr = lp.linkAddresses.map { it.address }.sortedBy { if(it is Inet6Address) 0 else 1 }.first()
+        localAddr =
+            lp.linkAddresses
+                .map { it.address }
+                .sortedBy { if (it is Inet6Address) 0 else 1 }
+                .first()
         pcscfAddr = pcscf
 
         Rlog.w(TAG, "Connecting with address $localAddr to $pcscfAddr")
 
         val clientSpiC = ipSecManager.allocateSecurityParameterIndex(localAddr)
         val clientSpiS = ipSecManager.allocateSecurityParameterIndex(localAddr, clientSpiC.spi + 1)
-        ipsecSettings = SipIpsecSettings(
-            clientSpiS = clientSpiS,
-            clientSpiC = clientSpiC)
+        ipsecSettings =
+            SipIpsecSettings(
+                clientSpiS = clientSpiS,
+                clientSpiC = clientSpiC,
+            )
 
-        plainSocket = if (isControlSocketUdp)
-            SipConnectionUdp(network, pcscfAddr, localAddr)
-        else
-            SipConnectionTcp(network, pcscfAddr, localAddr)
+        plainSocket =
+            if (isControlSocketUdp) {
+                SipConnectionUdp(network, pcscfAddr, localAddr)
+            } else {
+                SipConnectionTcp(network, pcscfAddr, localAddr)
+            }
         plainSocket.connect(5060)
-        socket = if(plainSocket is SipConnectionTcp)
+        socket =
+            if (plainSocket is SipConnectionTcp) {
                 SipConnectionTcp(network, pcscfAddr, plainSocket.gLocalAddr())
-            else
+            } else {
                 SipConnectionUdp(network, pcscfAddr, plainSocket.gLocalAddr())
+            }
         serverSocket =
             SipConnectionTcpServer(network, pcscfAddr, plainSocket.gLocalAddr(), socket.gLocalPort() + 1)
         serverSocketUdp =
             SipConnectionUdpServer(network, pcscfAddr, plainSocket.gLocalAddr(), socket.gLocalPort() + 1)
 
-        Rlog.d(TAG, "Src port is ${socket.gLocalPort()}, TCP server port is ${serverSocket.localPort}, UDP server port is ${serverSocketUdp.localPort}")
+        Rlog.d(
+            TAG,
+            "Src port is ${socket.gLocalPort()}, TCP server port is ${serverSocket.localPort}, UDP server port is ${serverSocketUdp.localPort}",
+        )
         updateCommonHeaders(plainSocket)
         register(plainSocket.gWriter())
         val plainRegReply =
@@ -271,11 +334,11 @@ class SipHandler(val ctxt: Context) {
                 plainSocket.gReader().parseMessage()
             } else {
                 // In some IMS servers, in UDP send mode, message might come back to plainSocket or to serverSocketUdp
-                if (select(listOf(serverSocketUdp.getChannel(), plainSocket.getChannel())) == 0)
+                if (select(listOf(serverSocketUdp.getChannel(), plainSocket.getChannel())) == 0) {
                     serverSocketUdp.gReader().parseMessage()
-                else
+                } else {
                     plainSocket.gReader().parseMessage()
-
+                }
             }
         Rlog.d(TAG, "Received $plainRegReply")
         plainSocket.close()
@@ -297,30 +360,29 @@ class SipHandler(val ctxt: Context) {
         val akaResult = sipAkaChallenge(telephonyManager, nonceB64)
         // Use non-sess digest when server doesn't offer qop (no cnonce/nc in response).
         akaDigest =
-            if(requireNonsessAka || wwwAuthenticateParams["qop"] == null)
+            if (requireNonsessAka || wwwAuthenticateParams["qop"] == null) {
                 SipAkaDigest(
                     user = user,
                     realm = challengeRealm,
                     uri = "sip:$realm",
                     nonceB64 = nonceB64,
                     opaque = wwwAuthenticateParams["opaque"],
-                    akaResult = akaResult
-                )
-                .toString()
-            else
-            SipAkaDigestSess(
+                    akaResult = akaResult,
+                ).toString()
+            } else {
+                SipAkaDigestSess(
                     user = user,
                     realm = challengeRealm,
                     uri = "sip:$realm",
                     nonceB64 = nonceB64,
                     opaque = wwwAuthenticateParams["opaque"],
-                    akaResult = akaResult
-                )
-                .toString()
+                    akaResult = akaResult,
+                ).toString()
+            }
 
         var portS = 5060
         // Check if there is a security-server header in the reply
-        if(plainRegReply.headers.containsKey("security-server")) {
+        if (plainRegReply.headers.containsKey("security-server")) {
             val securityServer = plainRegReply.headers["security-server"]!!
             commonHeaders += ("security-verify" to securityServer)
             registerHeaders += ("security-verify" to securityServer)
@@ -332,8 +394,7 @@ class SipHandler(val ctxt: Context) {
                     .filter {
                         val thisEAlg = it.component2()["ealg"] ?: "null"
                         supported_ealg.contains(thisEAlg)
-                    }
-                    .filter { supported_alg.contains(it.component2()["alg"]) }
+                    }.filter { supported_alg.contains(it.component2()["alg"]) }
                     .sortedByDescending { it.component2()["q"]?.toFloat() ?: 0.toFloat() }[0]
             require(securityServerType == "ipsec-3gpp")
 
@@ -345,21 +406,25 @@ class SipHandler(val ctxt: Context) {
             val spiC = securityServerParams["spi-c"]!!.toUInt().toInt()
             val serverSpiC = ipSecManager.allocateSecurityParameterIndex(pcscfAddr, spiC)
 
-            ipsecSettings = SipIpsecSettings(
-                clientSpiS = clientSpiS,
-                clientSpiC = clientSpiC,
-                serverSpiC = serverSpiC,
-                serverSpiS = serverSpiS)
+            ipsecSettings =
+                SipIpsecSettings(
+                    clientSpiS = clientSpiS,
+                    clientSpiC = clientSpiC,
+                    serverSpiC = serverSpiC,
+                    serverSpiS = serverSpiS,
+                )
 
             val ealg = securityServerParams["ealg"] ?: "null"
-            val (alg, hmac_key) = if (securityServerParams["alg"] == "hmac-sha-1-96") {
-                // sha-1-96 mac key must be 160 bits, pad ik
-                IpSecAlgorithm.AUTH_HMAC_SHA1 to akaResult.ik + ByteArray(4)
-            } else {
-                IpSecAlgorithm.AUTH_HMAC_MD5 to akaResult.ik
-            }
+            val (alg, hmac_key) =
+                if (securityServerParams["alg"] == "hmac-sha-1-96") {
+                    // sha-1-96 mac key must be 160 bits, pad ik
+                    IpSecAlgorithm.AUTH_HMAC_SHA1 to akaResult.ik + ByteArray(4)
+                } else {
+                    IpSecAlgorithm.AUTH_HMAC_MD5 to akaResult.ik
+                }
             val ipSecBuilder =
-                IpSecTransform.Builder(ctxt)
+                IpSecTransform
+                    .Builder(ctxt)
                     .setAuthentication(IpSecAlgorithm(alg, hmac_key, 96))
                     .also {
                         if (ealg == "aes-cbc") {
@@ -376,11 +441,16 @@ class SipHandler(val ctxt: Context) {
         socket.connect(portS)
         updateCommonHeaders(socket)
         register()
-        val regReply = (
-            if (socket is SipConnectionTcp) socket.gReader()
-            else if (socket is SipConnectionUdp) serverSocketUdp.gReader()
-            else socket.gReader()
-        ).parseMessage()!!
+        val regReply =
+            (
+                if (socket is SipConnectionTcp) {
+                    socket.gReader()
+                } else if (socket is SipConnectionUdp) {
+                    serverSocketUdp.gReader()
+                } else {
+                    socket.gReader()
+                }
+            ).parseMessage()!!
         Rlog.d(TAG, "Received $regReply")
 
         if (regReply !is SipResponse || regReply.statusCode != 200) {
@@ -407,11 +477,13 @@ class SipHandler(val ctxt: Context) {
             try {
                 while (parseMessage(socket.gReader(), socket.gWriter())) { }
                 Rlog.w(TAG, "Main socket got EOF, reconnecting")
-            } catch(t: Throwable) {
+            } catch (t: Throwable) {
                 Rlog.w(TAG, "Got exception in main/control socket, reconnecting", t)
             }
             socket.close()
-            try { connect() } catch (t: Throwable) {
+            try {
+                connect()
+            } catch (t: Throwable) {
                 Rlog.e(TAG, "Reconnect after main socket loss failed", t)
                 imsFailureCallback?.invoke()
             }
@@ -428,7 +500,7 @@ class SipHandler(val ctxt: Context) {
                     while (parseMessage(reader, writer)) { }
                     client.close()
                 }
-            } catch(t: Throwable) {
+            } catch (t: Throwable) {
                 Rlog.d(TAG, "Got exception in TCP server socket", t)
             }
         }
@@ -449,7 +521,7 @@ class SipHandler(val ctxt: Context) {
                     serverSocketUdp.socket.send(dgramPacketOut)
                     writer.reset()
                 }
-            } catch(t: Throwable) {
+            } catch (t: Throwable) {
                 Rlog.d(TAG, "Got exception in UDP server socket", t)
             }
         }
@@ -458,13 +530,15 @@ class SipHandler(val ctxt: Context) {
     fun getVolteNetwork() {
         // TODO add something similar for VoWifi ipsec tunnel?
         Rlog.d(TAG, "Requesting IMS network")
-        connectivityManager.requestNetwork(NetworkRequest.Builder()
-            //.addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
-            //.addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-            //.setNetworkSpecifier(subId.toString())
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_IMS)
-            //.addCapability(NetworkCapabilities.NET_CAPABILITY_MMTEL)
-            .build(),
+        connectivityManager.requestNetwork(
+            NetworkRequest
+                .Builder()
+                // .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+                // .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                // .setNetworkSpecifier(subId.toString())
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_IMS)
+                // .addCapability(NetworkCapabilities.NET_CAPABILITY_MMTEL)
+                .build(),
             object : ConnectivityManager.NetworkCallback() {
                 override fun onUnavailable() {
                     Rlog.d(TAG, "IMS network unavailable")
@@ -474,29 +548,35 @@ class SipHandler(val ctxt: Context) {
                     Rlog.d(TAG, "IMS network lost")
                 }
 
-                override fun onBlockedStatusChanged(network: Network, blocked: Boolean) {
+                override fun onBlockedStatusChanged(
+                    network: Network,
+                    blocked: Boolean,
+                ) {
                     Rlog.d(TAG, "IMS network blocked status changed $blocked")
                 }
 
                 override fun onCapabilitiesChanged(
                     network: Network,
-                    networkCapabilities: NetworkCapabilities
+                    networkCapabilities: NetworkCapabilities,
                 ) {
                     Rlog.d(TAG, "IMS network capabilities changed $networkCapabilities")
                 }
 
-                override fun onLosing(network: Network, maxMsToLive: Int) {
+                override fun onLosing(
+                    network: Network,
+                    maxMsToLive: Int,
+                ) {
                     Rlog.d(TAG, "IMS network losing")
                 }
 
                 override fun onLinkPropertiesChanged(
                     _network: Network,
-                    linkProperties: LinkProperties
+                    linkProperties: LinkProperties,
                 ) {
                     Rlog.d(TAG, "IMS network link properties changed $linkProperties")
                     val pcscfs = linkProperties!!.javaClass.getMethod("getPcscfServers").invoke(linkProperties) as List<*>
                     Rlog.d(TAG, "Got pcscfs $pcscfs")
-                    if(pcscfs.isNotEmpty() && abandonnedBecauseOfNoPcscf) {
+                    if (pcscfs.isNotEmpty() && abandonnedBecauseOfNoPcscf) {
                         // Switch to this network if it has P-CSCF (could be a different bearer)
                         network = _network
                         try {
@@ -523,31 +603,35 @@ class SipHandler(val ctxt: Context) {
                         Rlog.d(TAG, "... don't try anything")
                     }
                 }
-            }
+            },
         )
     }
 
     fun updateCommonHeaders(socket: SipConnection) {
         // Note: we are giving serverSocket (TCP) port, but TCP and UDP servers use the same port
-        val local = if(socket.gLocalAddr() is Inet6Address)
-            "[${socket.gLocalAddr().hostAddress}]:${serverSocket.localPort}"
-        else
-            "${socket.gLocalAddr().hostAddress}:${serverSocket.localPort}"
+        val local =
+            if (socket.gLocalAddr() is Inet6Address) {
+                "[${socket.gLocalAddr().hostAddress}]:${serverSocket.localPort}"
+            } else {
+                "${socket.gLocalAddr().hostAddress}:${serverSocket.localPort}"
+            }
 
         val sipInstance = "<urn:gsma:imei:${imei.substring(0,8)}-${imei.substring(8,14)}-0>"
         val transport = if (socket is SipConnectionTcp) "tcp" else "udp"
         contact =
             """<sip:$imsi@$local;transport=$transport>;expires=600000;+sip.instance="$sipInstance";+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mmtel";+g.3gpp.smsip;audio"""
         val newHeaders =
-            (if(socket is SipConnectionTcp) {
-                """
+            (
+                if (socket is SipConnectionTcp) {
+                    """
                 Via: SIP/2.0/TCP $local;rport
                 """
-            } else {
-                """
+                } else {
+                    """
                 Via: SIP/2.0/UDP $local;rport
                 """
-            }).toSipHeadersMap()
+                }
+            ).toSipHeadersMap()
         registerHeaders += newHeaders
         commonHeaders += newHeaders
     }
@@ -557,23 +641,32 @@ class SipHandler(val ctxt: Context) {
         val tm = ctxt.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
 
         val cellInfoList = tm.getAllCellInfo()
-        for(cell in cellInfoList) {
-            if(cell is CellInfoLte) {
+        for (cell in cellInfoList) {
+            if (cell is CellInfoLte) {
                 val cellIdentity = cell.cellIdentity
                 val cellSignalStrength = cell.cellSignalStrength
-                Rlog.d(TAG, "LTE cell: ${cellIdentity.ci}, ${cellIdentity.pci}, ${cellIdentity.tac}, ${cellIdentity.mcc}, ${cellIdentity.mnc}, ${cellSignalStrength.dbm}")
-            } else if(cell is CellInfoNr) {
+                Rlog.d(
+                    TAG,
+                    "LTE cell: ${cellIdentity.ci}, ${cellIdentity.pci}, ${cellIdentity.tac}, ${cellIdentity.mcc}, ${cellIdentity.mnc}, ${cellSignalStrength.dbm}",
+                )
+            } else if (cell is CellInfoNr) {
                 val cellIdentity = cell.cellIdentity
                 val cellSignalStrength = cell.cellSignalStrength
-                Rlog.d(TAG, "NR cell: ${cellIdentity.operatorAlphaLong}, ${cellIdentity.operatorAlphaShort}, ${cellIdentity}")
-            } else if(cell is CellInfoWcdma) {
+                Rlog.d(TAG, "NR cell: ${cellIdentity.operatorAlphaLong}, ${cellIdentity.operatorAlphaShort}, $cellIdentity")
+            } else if (cell is CellInfoWcdma) {
                 val cellIdentity = cell.cellIdentity
                 val cellSignalStrength = cell.cellSignalStrength
-                Rlog.d(TAG, "WCDMA cell: ${cellIdentity.cid}, ${cellIdentity.lac}, ${cellIdentity.mcc}, ${cellIdentity.mnc}, ${cellSignalStrength.dbm}")
-            } else if(cell is CellInfoGsm) {
+                Rlog.d(
+                    TAG,
+                    "WCDMA cell: ${cellIdentity.cid}, ${cellIdentity.lac}, ${cellIdentity.mcc}, ${cellIdentity.mnc}, ${cellSignalStrength.dbm}",
+                )
+            } else if (cell is CellInfoGsm) {
                 val cellIdentity = cell.cellIdentity
                 val cellSignalStrength = cell.cellSignalStrength
-                Rlog.d(TAG, "GSM cell: ${cellIdentity.cid}, ${cellIdentity.lac}, ${cellIdentity.mcc}, ${cellIdentity.mnc}, ${cellSignalStrength.dbm}")
+                Rlog.d(
+                    TAG,
+                    "GSM cell: ${cellIdentity.cid}, ${cellIdentity.lac}, ${cellIdentity.mcc}, ${cellIdentity.mnc}, ${cellSignalStrength.dbm}",
+                )
             }
         }
 
@@ -586,21 +679,24 @@ class SipHandler(val ctxt: Context) {
 
         val writer = _writer ?: socket.gWriter()
 
-        fun secClient(alg: String, ealg: String) =
-            "ipsec-3gpp;prot=esp;mod=trans;spi-c=${ipsecSettings.clientSpiC.spi};spi-s=${ipsecSettings.clientSpiS.spi};port-c=${socket.gLocalPort()};port-s=${serverSocket.localPort};ealg=${ealg};alg=${alg}"
+        fun secClient(
+            alg: String,
+            ealg: String,
+        ) =
+            "ipsec-3gpp;prot=esp;mod=trans;spi-c=${ipsecSettings.clientSpiC.spi};spi-s=${ipsecSettings.clientSpiS.spi};port-c=${socket.gLocalPort()};port-s=${serverSocket.localPort};ealg=$ealg;alg=$alg"
 
         val algs = listOf("hmac-sha-1-96", "hmac-md5-96")
         val ealgs = listOf("null", "aes-cbc")
-        val secClients = algs.flatMap { alg -> ealgs.map { ealg -> secClient(alg, ealg) }}
+        val secClients = algs.flatMap { alg -> ealgs.map { ealg -> secClient(alg, ealg) } }
         val secClientLine =
             "Security-Client: ${secClients.joinToString(", ")}"
 
-                    //P-Access-Network-Info: 3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=216302ee2003a107
+        // P-Access-Network-Info: 3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=216302ee2003a107
         val msg =
             SipRequest(
                 SipMethod.REGISTER,
                 "sip:$realm",
-                //"sip:lte-lguplus.co.kr",
+                // "sip:lte-lguplus.co.kr",
                 registerHeaders +
                     """
                     Expires: 600000
@@ -612,7 +708,7 @@ class SipHandler(val ctxt: Context) {
                     Require: sec-agree
                     Proxy-Require: sec-agree
                     $secClientLine
-                    """.toSipHeadersMap()
+                    """.toSipHeadersMap(),
             ) // route present on all calls except this
         Rlog.d(TAG, "Sending $msg")
         synchronized(writer) { writer.write(msg.toByteArray()) }
@@ -624,11 +720,12 @@ class SipHandler(val ctxt: Context) {
         // on failure just abort thread, ims will restart
         require(response.statusCode == 200)
 
-        val r =  Regex("lr;[^>]*")
+        val r = Regex("lr;[^>]*")
         val route =
-            (response.headers.getOrDefault("service-route", emptyList()) +
-                    response.headers.getOrDefault("path", emptyList()))
-                .toSet() // remove duplicates
+            (
+                response.headers.getOrDefault("service-route", emptyList()) +
+                    response.headers.getOrDefault("path", emptyList())
+            ).toSet() // remove duplicates
                 .toList()
                 .map {
                     r.replace(it, "lr")
@@ -656,10 +753,11 @@ class SipHandler(val ctxt: Context) {
 
     fun subscribe() {
         val local =
-            if(socket.gLocalAddr() is Inet6Address)
+            if (socket.gLocalAddr() is Inet6Address) {
                 "[${socket.gLocalAddr().hostAddress}]:${serverSocket.localPort}"
-            else
+            } else {
                 "${socket.gLocalAddr().hostAddress}:${serverSocket.localPort}"
+            }
         val sipInstance = "<urn:gsma:imei:${imei.substring(0,8)}-${imei.substring(8,14)}-0>"
         val transport = if (socket is SipConnectionTcp) "tcp" else "udp"
         val contactTel =
@@ -680,7 +778,7 @@ class SipHandler(val ctxt: Context) {
                     Allow: INVITE, ACK, CANCEL, BYE, UPDATE, REFER, NOTIFY, INFO, MESSAGE, PRACK, OPTIONS
                     Accept: application/reginfo+xml
                     P-Access-Network-Info: 3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=20810b8c49752501
-                    """.toSipHeadersMap()
+                    """.toSipHeadersMap(),
             )
         if (!imsReady) {
             setResponseCallback(msg.headers["call-id"]!![0], ::subscribeCallback)
@@ -719,9 +817,10 @@ class SipHandler(val ctxt: Context) {
 
     fun handleUpdate(request: SipRequest): Int {
         val call = currentCall!!
-        val ipType = if(call.rtpRemoteAddr is Inet6Address) "IP6" else "IP4"
-        val allTracks = listOf(call.amrTrack, call.dtmfTrack).sorted()
-        val mySdp = """
+        val ipType = if (call.rtpRemoteAddr is Inet6Address) "IP6" else "IP4"
+        val allTracks = listOf(call.pcmuTrack, call.dtmfTrack).sorted()
+        val mySdp =
+            """
 v=0
 o=- 1 2 IN $ipType ${socket.gLocalAddr().hostAddress}
 s=phh voice call
@@ -734,9 +833,8 @@ m=audio ${call.rtpSocket.localPort} RTP/AVP ${allTracks.joinToString(" ")}
 b=AS:38
 b=RS:0
 b=RR:0
-a=rtpmap:${call.amrTrack} AMR/8000/1
+a=rtpmap:${call.pcmuTrack} PCMU/8000/1
 a=rtpmap:${call.dtmfTrack} telephone-event/8000
-a=${call.amrTrackDesc}
 a=ptime:20
 a=maxptime:240
 a=${call.dtmfTrackDesc}
@@ -747,19 +845,19 @@ a=des:qos mandatory remote sendrecv
 a=sendrecv
                        """.trim().toByteArray()
 
-        currentCall = Call(
-            outgoing =  call.outgoing,
-            amrTrack = call.amrTrack,
-            amrTrackDesc = call.amrTrackDesc,
-            dtmfTrack = call.dtmfTrack,
-            dtmfTrackDesc = call.dtmfTrackDesc,
-            callHeaders = call.callHeaders,
-            rtpRemoteAddr = call.rtpRemoteAddr,
-            rtpRemotePort = call.rtpRemotePort,
-            rtpSocket = call.rtpSocket,
-            sdp = request.body,
-            hasEarlyMedia = call.hasEarlyMedia,
-            remoteContact = call.remoteContact,
+        currentCall =
+            Call(
+                outgoing = call.outgoing,
+                pcmuTrack = call.pcmuTrack,
+                dtmfTrack = call.dtmfTrack,
+                dtmfTrackDesc = call.dtmfTrackDesc,
+                callHeaders = call.callHeaders,
+                rtpRemoteAddr = call.rtpRemoteAddr,
+                rtpRemotePort = call.rtpRemotePort,
+                rtpSocket = call.rtpSocket,
+                sdp = request.body,
+                hasEarlyMedia = call.hasEarlyMedia,
+                remoteContact = call.remoteContact,
             )
 
         val reply =
@@ -767,26 +865,27 @@ a=sendrecv
                 statusCode = 200,
                 statusString = "OK",
                 headersParam =
-                request.headers.filter { (k, _) ->
-                    k in listOf("cseq", "via", "from", "to", "call-id")
-                } + """
+                    request.headers.filter { (k, _) ->
+                        k in listOf("cseq", "via", "from", "to", "call-id")
+                    } +
+                        """
                     Content-Type: application/sdp
                     Supported: 100rel, replaces, timer
                     Require: precondition
                     Call-ID: ${currentCall!!.callHeaders["call-id"]!![0]}
                 """.toSipHeadersMap(),
-                body = mySdp
+                body = mySdp,
             )
         Rlog.d(TAG, "Replying back with $reply")
         synchronized(socket.gWriter()) { socket.gWriter().write(reply.toByteArray()) }
 
-        if(call?.outgoing == false) {
+        if (call?.outgoing == false) {
             val myHeaders2 = call.callHeaders - "rseq" - "content-type" - "require"
             val msg2 =
                 SipResponse(
                     statusCode = 180,
                     statusString = "Ringing",
-                    headersParam = myHeaders2
+                    headersParam = myHeaders2,
                 )
             Rlog.d(TAG, "Sending $msg2")
             synchronized(socket.gWriter()) { socket.gWriter().write(msg2.toByteArray()) }
@@ -813,8 +912,7 @@ a=sendrecv
         val outgoing: Boolean,
         val callHeaders: SipHeadersMap,
         val sdp: ByteArray,
-        val amrTrack: Int,
-        val amrTrackDesc: String,
+        val pcmuTrack: Int,
         val dtmfTrack: Int,
         val dtmfTrackDesc: String,
         val rtpRemoteAddr: InetAddress,
@@ -824,7 +922,6 @@ a=sendrecv
         val remoteContact: String,
     )
 
-
     @SuppressLint("MissingPermission")
     fun callEncodeThread() {
         val call = currentCall!!
@@ -832,15 +929,15 @@ a=sendrecv
         thread {
             var sequenceNumber = 0
 
-            Rlog.d(TAG, "Encode thread started: amrTrack=${call.amrTrack} remote=${call.rtpRemoteAddr}:${call.rtpRemotePort} gen=$gen")
-            val encoder = MediaCodec.createEncoderByType("audio/3gpp")
-            val mediaFormat = MediaFormat.createAudioFormat("audio/3gpp", 8000, 1)
-            mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, 12200)
-            mediaFormat.setInteger(MediaFormat.KEY_PRIORITY, 0) //  0 = realtime priority, encoder will not fall behind
+            Rlog.d(TAG, "Encode thread started: pcmuTrack=${call.pcmuTrack} remote=${call.rtpRemoteAddr}:${call.rtpRemotePort} gen=$gen")
+            val encoder = MediaCodec.createEncoderByType("audio/g711-mlaw")
+            val mediaFormat = MediaFormat.createAudioFormat("audio/g711-mlaw", 8000, 1)
+            // mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, 12200)
+            // mediaFormat.setInteger(MediaFormat.KEY_PRIORITY, 0) //  0 = realtime priority, encoder will not fall behind
             encoder.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             encoder.start()
 
-            while(!callStarted.get()) {
+            while (!callStarted.get()) {
                 if (callStopped.get() || callGeneration.get() != gen) {
                     Rlog.d(TAG, "Silence loop exiting early: callStopped=${callStopped.get()}, genMismatch=${callGeneration.get() != gen}")
                     encoder.stop()
@@ -849,17 +946,25 @@ a=sendrecv
                 }
                 val timestamp = sequenceNumber * 160
                 Thread.sleep(20)
-                val rtpHeader = listOf(
-                    // RTP
-                    0x80, //rtp version
-                    call.amrTrack, //payload type
-                    (sequenceNumber shr 8), (sequenceNumber and 0xff),
-                    (timestamp shr 24), ((timestamp shr 16) and 0xff), ((timestamp shr 8) and 0xff), (timestamp and 0xff),
-                    0x03, 0x00, 0xd2, 0x00, //SSRC
-                )
-                val amrNothing = listOf(0x77, 0xc0) // CMR = 12.2kbps, F=0, FT=15=No TX/No RX, Q=1
+                val rtpHeader =
+                    listOf(
+                        // RTP
+                        0x80, // rtp version
+                        call.pcmuTrack, // payload type
+                        (sequenceNumber shr 8),
+                        (sequenceNumber and 0xff),
+                        (timestamp shr 24),
+                        ((timestamp shr 16) and 0xff),
+                        ((timestamp shr 8) and 0xff),
+                        (timestamp and 0xff),
+                        0x03,
+                        0x00,
+                        0xd2,
+                        0x00, // SSRC
+                    )
+                val pcmuNothing = listOf(0x77, 0xc0) // CMR = 12.2kbps, F=0, FT=15=No TX/No RX, Q=1
 
-                val buf = (rtpHeader + amrNothing).map { it.toUByte() }.toUByteArray().toByteArray()
+                val buf = (rtpHeader + pcmuNothing).map { it.toUByte() }.toUByteArray().toByteArray()
 
                 val dgramPacket =
                     DatagramPacket(buf, buf.size, call.rtpRemoteAddr, call.rtpRemotePort)
@@ -871,7 +976,14 @@ a=sendrecv
             // DANGER: Don't open the mic before the user acknowledged opening the call!
 
             val minBufferSize = AudioRecord.getMinBufferSize(8000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-            val audioRecord = AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, 8000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBufferSize)
+            val audioRecord =
+                AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    8000,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    minBufferSize,
+                )
             Rlog.d(TAG, "AudioRecord created with minBufferSize=$minBufferSize, state=${audioRecord.state}")
 
             // Pin capture to the built-in mic so the Samsung HAL cannot reroute it to
@@ -879,8 +991,10 @@ a=sendrecv
             // setPreferredDevice overrides HAL source-based routing while keeping
             // VOICE_COMMUNICATION semantics (call-mode output path stays correct).
             val audioManager = ctxt.getSystemService(android.media.AudioManager::class.java)
-            val builtinMic = audioManager.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)
-                .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
+            val builtinMic =
+                audioManager
+                    .getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)
+                    .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
             if (builtinMic != null) {
                 audioRecord.preferredDevice = builtinMic
                 Rlog.d(TAG, "AudioRecord preferredDevice set to builtin mic: id=${builtinMic.id} name=${builtinMic.productName}")
@@ -891,7 +1005,10 @@ a=sendrecv
             val prevAudioMode = audioManager.mode
             audioManager.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
             audioRecord.startRecording()
-            Rlog.d(TAG, "AudioRecord started, state=${audioRecord.recordingState} audioMode=${audioManager.mode} (was $prevAudioMode) preferredDevice=${audioRecord.preferredDevice?.type}")
+            Rlog.d(
+                TAG,
+                "AudioRecord started, state=${audioRecord.recordingState} audioMode=${audioManager.mode} (was $prevAudioMode) preferredDevice=${audioRecord.preferredDevice?.type}",
+            )
 
             var firstPacket = true
             var realFrameCount = 0
@@ -941,7 +1058,12 @@ a=sendrecv
                     encoder.releaseOutputBuffer(outBufIdx, false)
 
                     if (realFrameCount == 0) {
-                        Rlog.d(TAG, "First encoder output: size=${outBufInfo.size} raw=${encoderData.take(32).joinToString(" ") { "%02x".format(it) }}")
+                        Rlog.d(
+                            TAG,
+                            "First encoder output: size=${outBufInfo.size} raw=${encoderData.take(
+                                32,
+                            ).joinToString(" ") { "%02x".format(it) }}",
+                        )
                     }
 
                     var bufPos = 0
@@ -949,56 +1071,74 @@ a=sendrecv
                         val frameSize = 32
                         if (outBufInfo.size - bufPos < frameSize) break
 
-                        // Encoder outputs octet-aligned AMR-NB frames (RFC 4867 §5):
+                        // Encoder outputs octet-aligned PCMU frames (RFC 4867 §5):
                         //   byte 0 = frame header: [0][FT[3:0]][Q][PP]
                         //   bytes 1-31 = 244 payload bits, MSB-first, 4 bits zero-padding at end
                         val ft = (encoderData[bufPos].toUByte().toInt() shr 3) and 0xf
-                        val q  = (encoderData[bufPos].toUByte().toInt() shr 2) and 0x1
+                        val q = (encoderData[bufPos].toUByte().toInt() shr 2) and 0x1
 
                         // Build RFC 4867 §4.4 bandwidth-efficient single-frame payload (32 bytes):
                         //   [CMR(4)][F(1)][FT(4)][Q(1)][payload_bits(244)][pad(2)]
                         // CMR=15 (0xF) = no codec-mode request; F=0 = last (only) frame.
                         val cmr = 0xf
-                        val f   = 0
+                        val f = 0
                         // Byte 0: CMR[3:0] | F | FT[3:1]
                         val beByte0 = (cmr shl 4) or (f shl 3) or (ft shr 1)
                         // Byte 1: FT[0] | Q | payload[0:5]  (upper 6 bits of encoder byte 1)
-                        val beByte1 = ((ft and 1) shl 7) or (q shl 6) or
-                                      (encoderData[bufPos + 1].toUByte().toInt() shr 2)
+                        val beByte1 =
+                            ((ft and 1) shl 7) or (q shl 6) or
+                                (encoderData[bufPos + 1].toUByte().toInt() shr 2)
                         // Bytes 2-31: slide a 2-bit window across encoder bytes 1-31
-                        val beRest = (1 until frameSize - 1).map { i ->
-                            val lo = (encoderData[bufPos + i].toUByte().toInt() and 0x3) shl 6
-                            val hi = (encoderData[bufPos + i + 1].toUByte().toInt() shr 2) and 0x3f
-                            lo or hi
-                        }
+                        val beRest =
+                            (1 until frameSize - 1).map { i ->
+                                val lo = (encoderData[bufPos + i].toUByte().toInt() and 0x3) shl 6
+                                val hi = (encoderData[bufPos + i + 1].toUByte().toInt() shr 2) and 0x3f
+                                lo or hi
+                            }
 
                         // Every 20 ms, at 8 kHz, we have 160 samples
                         val timestamp = sequenceNumber * 160
-                        val rtpHeader = byteArrayOf(
-                            0x80.toByte(),
-                            ((if (firstPacket) 0x80 else 0) or call.amrTrack).toByte(),
-                            (sequenceNumber shr 8).toByte(), (sequenceNumber and 0xff).toByte(),
-                            (timestamp shr 24).toByte(), ((timestamp shr 16) and 0xff).toByte(),
-                            ((timestamp shr 8) and 0xff).toByte(), (timestamp and 0xff).toByte(),
-                            0x03, 0x00, 0xd2.toByte(), 0x00
-                        )
+                        val rtpHeader =
+                            byteArrayOf(
+                                0x80.toByte(),
+                                ((if (firstPacket) 0x80 else 0) or call.pcmuTrack).toByte(),
+                                (sequenceNumber shr 8).toByte(),
+                                (sequenceNumber and 0xff).toByte(),
+                                (timestamp shr 24).toByte(),
+                                ((timestamp shr 16) and 0xff).toByte(),
+                                ((timestamp shr 8) and 0xff).toByte(),
+                                (timestamp and 0xff).toByte(),
+                                0x03,
+                                0x00,
+                                0xd2.toByte(),
+                                0x00,
+                            )
                         firstPacket = false
 
-                        val buf = rtpHeader +
-                            byteArrayOf(beByte0.toByte(), beByte1.toByte()) +
-                            beRest.map { it.toByte() }.toByteArray()
+                        val buf =
+                            rtpHeader +
+                                byteArrayOf(beByte0.toByte(), beByte1.toByte()) +
+                                beRest.map { it.toByte() }.toByteArray()
 
                         val dgramPacket = DatagramPacket(buf, buf.size, call.rtpRemoteAddr, call.rtpRemotePort)
                         try {
                             call.rtpSocket.send(dgramPacket)
                             if (realFrameCount < 10) {
-                                Rlog.d(TAG, "Sent RTP packet #$sequenceNumber ft=$ft ts=$timestamp payload=${buf.drop(12).take(4).joinToString(" ") { "%02x".format(it) }}... to ${call.rtpRemoteAddr}:${call.rtpRemotePort}")
+                                Rlog.d(
+                                    TAG,
+                                    "Sent RTP packet #$sequenceNumber ft=$ft ts=$timestamp payload=${buf.drop(
+                                        12,
+                                    ).take(4).joinToString(" ") { "%02x".format(it) }}... to ${call.rtpRemoteAddr}:${call.rtpRemotePort}",
+                                )
                             }
                             if (realFrameCount == 0) {
                                 Rlog.d(TAG, "First RTP packet full hex: ${buf.joinToString(" ") { "%02x".format(it) }}")
                             }
                             if (sequenceNumber % 50 == 0 && realFrameCount >= 10) {
-                                Rlog.d(TAG, "Sent RTP packet #$sequenceNumber ft=$ft ts=$timestamp to ${call.rtpRemoteAddr}:${call.rtpRemotePort}")
+                                Rlog.d(
+                                    TAG,
+                                    "Sent RTP packet #$sequenceNumber ft=$ft ts=$timestamp to ${call.rtpRemoteAddr}:${call.rtpRemotePort}",
+                                )
                             }
                         } catch (e: Exception) {
                             Rlog.e(TAG, "Failed to send RTP packet #$sequenceNumber: ${e.message}", e)
@@ -1010,7 +1150,10 @@ a=sendrecv
                     }
                 }
             }
-            Rlog.d(TAG, "Encode thread exiting: callStopped=${callStopped.get()}, genMismatch=${callGeneration.get() != gen}, totalPacketsSent=$sequenceNumber")
+            Rlog.d(
+                TAG,
+                "Encode thread exiting: callStopped=${callStopped.get()}, genMismatch=${callGeneration.get() != gen}, totalPacketsSent=$sequenceNumber",
+            )
             audioRecord.stop()
             audioRecord.release()
             encoder.stop()
@@ -1020,6 +1163,7 @@ a=sendrecv
     }
 
     var currentCall: Call? = null
+
     fun acceptCall() {
         thread {
             // Wait for any outstanding PRACK acknowledgements before sending 200 OK (RFC 3262 §5)
@@ -1027,10 +1171,11 @@ a=sendrecv
             pendingSeqs.forEach { waitPrack(it) }
 
             val local =
-                if(socket.gLocalAddr() is Inet6Address)
+                if (socket.gLocalAddr() is Inet6Address) {
                     "[${socket.gLocalAddr().hostAddress}]:${serverSocket.localPort}"
-                else
+                } else {
                     "${socket.gLocalAddr().hostAddress}:${serverSocket.localPort}"
+                }
             val sipInstance = "<urn:gsma:imei:${imei.substring(0, 8)}-${imei.substring(8, 14)}-0>"
             val transport = if (socket is SipConnectionTcp) "tcp" else "udp"
             val evolvedContact =
@@ -1039,7 +1184,9 @@ a=sendrecv
             Rlog.d(TAG, "Accepting call")
             val call = currentCall!!
             val myHeaders = call.callHeaders
-            val myHeaders3 = myHeaders - "rseq" - "security-verify" + """
+            val myHeaders3 =
+                myHeaders - "rseq" - "security-verify" +
+                    """
                 Session-Expires: 900;refresher=uas
                 P-Preferred-Identity: <$mySip>
                 Contact: $evolvedContact
@@ -1053,7 +1200,7 @@ a=sendrecv
                     statusCode = 200,
                     statusString = "OK",
                     headersParam = myHeaders3,
-                    body = call.sdp
+                    body = call.sdp,
                 )
             Rlog.d(TAG, "Sending $msg3")
             synchronized(socket.gWriter()) { socket.gWriter().write(msg3.toByteArray()) }
@@ -1076,13 +1223,15 @@ a=sendrecv
             SipRequest(
                 SipMethod.PRACK,
                 who,
-                headersParam = headers + """
+                headersParam =
+                    headers +
+                        """
                     RAck: $whatToPrack
                     Require: sec-agree
                     To: ${resp.headers["to"]!![0]}
                     From: ${resp.headers["from"]!![0]}
                     Call-Id: $callId
-                    """.toSipHeadersMap()
+                    """.toSipHeadersMap(),
             )
         Rlog.d(TAG, "Sending $msg")
         synchronized(socket.gWriter()) { socket.gWriter().write(msg.toByteArray()) }
@@ -1098,7 +1247,7 @@ a=sendrecv
                 SipResponse(
                     statusCode = 486,
                     statusString = "Busy Here",
-                    headersParam = myHeaders
+                    headersParam = myHeaders,
                 )
             Rlog.d(TAG, "Sending $msg")
             synchronized(socket.gWriter()) { socket.gWriter().write(msg.toByteArray()) }
@@ -1114,11 +1263,12 @@ a=sendrecv
         // BYE is a dialog request; must use dialog route set (from 200 OK Record-Route)
         // stored in call.callHeaders, not the registration Service-Route in commonHeaders
         val byeHeaders = call.callHeaders.filterKeys { it != "content-type" }
-        val bye = SipRequest(
-            SipMethod.BYE,
-            call.remoteContact,
-            headersParam = byeHeaders
-        )
+        val bye =
+            SipRequest(
+                SipMethod.BYE,
+                call.remoteContact,
+                headersParam = byeHeaders,
+            )
         Rlog.d(TAG, "Sending BYE $bye")
         synchronized(socket.gWriter()) { socket.gWriter().write(bye.toByteArray()) }
         onCancelledCall?.invoke(Object(), "", emptyMap())
@@ -1138,7 +1288,7 @@ a=sendrecv
          a=curr:qos local none   (we haven't allocated media yet)
          a=curr:qos remote none  (remote hasn't either)
          a=des:qos optional local/remote sendrecv
-         Lists all tracks we support (AMR, DTMF).
+         Lists all tracks we support (PCMU, DTMF).
 
     2. Receive 100 Trying — ignored (no SDP → return false).
 
@@ -1183,6 +1333,7 @@ a=sendrecv
      */
 
     var respInFlight: SipResponse? = null
+
     fun call(phoneNumber: String) {
         thread {
             callStopped.set(false)
@@ -1192,18 +1343,18 @@ a=sendrecv
 
             val rtpSocket = DatagramSocket(0, localAddr)
             network.bindSocket(rtpSocket)
-            //rtpSocket.connect(rtpRemoteAddr, rtpRemotePort.toInt())
+            // rtpSocket.connect(rtpRemoteAddr, rtpRemotePort.toInt())
             Rlog.d(TAG, "RTP socket created for outgoing call: local=${rtpSocket.localAddress}:${rtpSocket.localPort}")
 
-            val amrTrack = 97
-            val amrTrackDesc = "fmtp:97 mode-change-capability=2;octet-align=0;max-red=0"
+            val pcmuTrack = 0
             val dtmfTrack = 100
             val dtmfTrackDesc = "fmtp:100 0-15"
-            val allTracks = listOf(amrTrack,dtmfTrack).sorted()
+            val allTracks = listOf(pcmuTrack, dtmfTrack).sorted()
 
-            val ipType = if(localAddr is Inet6Address) "IP6" else "IP4"
+            val ipType = if (localAddr is Inet6Address) "IP6" else "IP4"
 
-            val sdp = """
+            val sdp =
+                """
 v=0
 o=- 1 2 IN $ipType ${socket.gLocalAddr().hostAddress}
 s=phh voice call
@@ -1218,9 +1369,8 @@ b=RS:0
 b=RR:0
 a=ptime:20
 a=maxptime:240
-a=rtpmap:$amrTrack AMR/8000/1
+a=rtpmap:$pcmuTrack PCMU/8000/1
 a=rtpmap:$dtmfTrack telephone-event/8000
-a=fmtp:$amrTrack mode-change-capability=2;octet-align=0;max-red=0
 a=fmtp:$dtmfTrack 0-15
 a=curr:qos local none
 a=curr:qos remote none
@@ -1232,15 +1382,17 @@ a=sendrecv
             val to = "tel:$phoneNumber;phone-context=ims.mnc$mnc.mcc$mcc.3gppnetwork.org"
             val sipInstance = "<urn:gsma:imei:${imei.substring(0, 8)}-${imei.substring(8, 14)}-0>"
             val local =
-                if(socket.gLocalAddr() is Inet6Address)
+                if (socket.gLocalAddr() is Inet6Address) {
                     "[${socket.gLocalAddr().hostAddress}]:${serverSocket.localPort}"
-                else
+                } else {
                     "${socket.gLocalAddr().hostAddress}:${serverSocket.localPort}"
+                }
             val transport = if (socket is SipConnectionTcp) "tcp" else "udp"
             val contactTel =
                 """<sip:$myTel@$local;transport=$transport>;expires=600000;+sip.instance="$sipInstance";+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mmtel";+g.3gpp.smsip;audio"""
-            val myHeaders = commonHeaders +
-                """
+            val myHeaders =
+                commonHeaders +
+                    """
                     From: <$mySip>
                     To: <$to>
                     P-Preferred-Identity: <$mySip>
@@ -1266,7 +1418,7 @@ a=sendrecv
                     SipMethod.INVITE,
                     to,
                     myHeaders,
-                    sdp
+                    sdp,
                 )
             setResponseCallback(msg.headers["call-id"]!![0]) { r: SipResponse ->
                 var resp = r
@@ -1281,7 +1433,7 @@ a=sendrecv
                     rseqHandled = true
                 }
 
-                if (cseq.contains("ACK")) return@setResponseCallback  false
+                if (cseq.contains("ACK")) return@setResponseCallback false
 
                 if (cseq.contains("INVITE") && (resp.statusCode == 200 || resp.statusCode == 202)) {
                     // ACK C-Seq must be the same as INVITE C-Seq
@@ -1291,8 +1443,10 @@ a=sendrecv
                     val newTo = resp.headers["to"]!![0]
                     val newFrom = resp.headers["from"]!![0]
                     // ACK to 2xx must be sent to the Contact from the response (RFC 3261 §13.2.2.4)
-                    val ackTo = resp.headers["contact"]?.get(0)
-                        ?.let { extractDestinationFromContact(it) } ?: to
+                    val ackTo =
+                        resp.headers["contact"]
+                            ?.get(0)
+                            ?.let { extractDestinationFromContact(it) } ?: to
                     // ACK is a dialog request; route set comes from Record-Route in the 200 OK
                     // (RFC 3261 §12.1.2), not from the registration Service-Route in myHeaders.
                     val dialogRoute = resp.headers["record-route"]
@@ -1301,11 +1455,12 @@ a=sendrecv
                         SipRequest(
                             SipMethod.ACK,
                             ackTo,
-                            ackHeaders - "content-type" + """
+                            ackHeaders - "content-type" +
+                                """
                                 CSeq: $cseq ACK
                                 To: $newTo
                                 From: $newFrom
-                                """.toSipHeadersMap()
+                                """.toSipHeadersMap(),
                         )
                     Rlog.d(TAG, "Sending $msg2")
                     synchronized(socket.gWriter()) { socket.gWriter().write(msg2.toByteArray()) }
@@ -1314,25 +1469,30 @@ a=sendrecv
                     // so that subsequent in-dialog requests (BYE, UPDATE) use the correct route.
                     val rrFrom200Ok = resp.headers["record-route"]
                     if (rrFrom200Ok != null) {
-                        currentCall = currentCall?.copy(
-                            callHeaders = currentCall!!.callHeaders + ("route" to rrFrom200Ok)
-                        )
+                        currentCall =
+                            currentCall?.copy(
+                                callHeaders = currentCall!!.callHeaders + ("route" to rrFrom200Ok),
+                            )
                     }
                     Rlog.d(TAG, "Invite got SUCCESS")
                     onOutgoingCallConnected?.invoke(Object(), emptyMap())
                 } else {
                     Rlog.d(TAG, "Invite got status ${resp.statusCode} = ${resp.statusString}")
-                    if(resp.statusCode >= 400) {
-                        onCancelledCall?.invoke(Object(), "",
+                    if (resp.statusCode >= 400) {
+                        onCancelledCall?.invoke(
+                            Object(),
+                            "",
                             mapOf(
                                 "statusCode" to resp.statusCode.toString(),
-                                "statusString" to resp.statusString))
+                                "statusString" to resp.statusString,
+                            ),
+                        )
                         // The whole call failed, so drop that call-id
                         return@setResponseCallback true
                     }
                 }
 
-                if(resp.headers["rseq"]?.isNotEmpty() == true && !rseqHandled) {
+                if (resp.headers["rseq"]?.isNotEmpty() == true && !rseqHandled) {
                     prack(resp)
                     respInFlight = resp
                     return@setResponseCallback false
@@ -1343,46 +1503,52 @@ a=sendrecv
 
                 if (!isSdp) return@setResponseCallback false
 
-                val respSdp = resp.body.toString(Charsets.UTF_8).split("[\r\n]+".toRegex()).toList()
+                val respSdp =
+                    resp.body
+                        .toString(Charsets.UTF_8)
+                        .split("[\r\n]+".toRegex())
+                        .toList()
 
                 fun sdpElement(command: String): String? {
-                    val v = respSdp.firstOrNull { it.startsWith("$command=")} ?: return null
+                    val v = respSdp.firstOrNull { it.startsWith("$command=") } ?: return null
                     return v.substring(2)
                 }
                 val rtpRemotePort = sdpElement("m")!!.split(" ")[1]
                 val rtpRemoteAddr = InetAddress.getByName(sdpElement("c")!!.split(" ")[2])
-                currentCall = Call(
-                    outgoing = true,
-                    amrTrack = amrTrack,
-                    amrTrackDesc = amrTrackDesc,
-                    dtmfTrack = dtmfTrack,
-                    dtmfTrackDesc = dtmfTrackDesc,
-                    // Update from/to/call-id based on the response we got to include the remote tag
-                    callHeaders = myHeaders - "require" - "content-type" + ("from" to resp.headers["from"]!!) + ("to" to resp.headers["to"]!!) + ("call-id" to resp.headers["call-id"]!!),
-                    rtpRemoteAddr = rtpRemoteAddr,
-                    rtpRemotePort = rtpRemotePort.toInt(),
-                    rtpSocket = rtpSocket,
-                    sdp = resp.body,
-                    hasEarlyMedia = resp.headers["p-early-media"]?.isNotEmpty() == true,
-                    remoteContact = extractDestinationFromContact(resp.headers["contact"]!![0]),
-                )
+                currentCall =
+                    Call(
+                        outgoing = true,
+                        pcmuTrack = pcmuTrack,
+                        dtmfTrack = dtmfTrack,
+                        dtmfTrackDesc = dtmfTrackDesc,
+                        // Update from/to/call-id based on the response we got to include the remote tag
+                        callHeaders =
+                            myHeaders - "require" - "content-type" + ("from" to resp.headers["from"]!!) + ("to" to resp.headers["to"]!!) +
+                                ("call-id" to resp.headers["call-id"]!!),
+                        rtpRemoteAddr = rtpRemoteAddr,
+                        rtpRemotePort = rtpRemotePort.toInt(),
+                        rtpSocket = rtpSocket,
+                        sdp = resp.body,
+                        hasEarlyMedia = resp.headers["p-early-media"]?.isNotEmpty() == true,
+                        remoteContact = extractDestinationFromContact(resp.headers["contact"]!![0]),
+                    )
 
                 // This isn't the answer to our INVITE, but to our later precondition UPDATE
                 // TODO Actually check cseq
-                if(resp.headers["cseq"]?.get(0)?.contains("UPDATE") == true) {
-                    if(isSdp && resp.statusCode == 200) {
+                if (resp.headers["cseq"]?.get(0)?.contains("UPDATE") == true) {
+                    if (isSdp && resp.statusCode == 200) {
                         // Nothing to do here, we've already upgraded the call with the new SDP, everything's fine
                         return@setResponseCallback false
                     }
                 }
 
-                if(isPrecondition && resp.statusCode == 183) {
+                if (isPrecondition && resp.statusCode == 183) {
                     Rlog.d(TAG, "Handling precondition...")
-                    val currLocal = respSdp.first { it.startsWith("a=curr:qos local")}
+                    val currLocal = respSdp.first { it.startsWith("a=curr:qos local") }
                     // No resource has been allocated at either side
                     val localNone = currLocal.contains("none")
                     Rlog.d(TAG, "precondition: Curr is $currLocal $localNone")
-                    val currRemote = respSdp.first { it.startsWith("a=curr:qos remote")}
+                    val currRemote = respSdp.first { it.startsWith("a=curr:qos remote") }
                     val remoteNone = currRemote.contains("none")
 
                     if (localNone) {
@@ -1392,22 +1558,25 @@ a=sendrecv
                             callEncodeThread()
                         }
 
-                        val newSdp = respSdp.map { line ->
-                            if (line.startsWith("a=curr:qos local")) {
-                                "a=curr:qos local sendrecv"
-                            } else if (line.startsWith("a=des:qos mandatory local")) {
-                                "a=des:qos mandatory local sendrecv"
-                            } else {
-                                line
-                            }
-                        }.joinToString("\r\n").toByteArray()
+                        val newSdp =
+                            respSdp
+                                .map { line ->
+                                    if (line.startsWith("a=curr:qos local")) {
+                                        "a=curr:qos local sendrecv"
+                                    } else if (line.startsWith("a=des:qos mandatory local")) {
+                                        "a=des:qos mandatory local sendrecv"
+                                    } else {
+                                        line
+                                    }
+                                }.joinToString("\r\n")
+                                .toByteArray()
 
                         val msg2 =
                             SipRequest(
                                 SipMethod.UPDATE,
                                 to,
                                 currentCall!!.callHeaders + ("content-type" to listOf("application/sdp")),
-                                newSdp
+                                newSdp,
                             )
                         Rlog.d(TAG, "Sending $msg2")
                         synchronized(socket.gWriter()) { socket.gWriter().write(msg2.toByteArray()) }
@@ -1416,7 +1585,7 @@ a=sendrecv
                     return@setResponseCallback false
                 }
 
-                if(!isPrecondition && resp.statusCode == 183) {
+                if (!isPrecondition && resp.statusCode == 183) {
                     if (threadsStarted.compareAndSet(false, true)) {
                         callDecodeThread()
                         callEncodeThread()
@@ -1435,16 +1604,24 @@ a=sendrecv
         // Receiving thread
         thread {
             val minBufferSize = AudioTrack.getMinBufferSize(8000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
-            val audioTrack = AudioTrack(AudioManager.STREAM_VOICE_CALL, 8000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT, minBufferSize, AudioTrack.MODE_STREAM)
+            val audioTrack =
+                AudioTrack(
+                    AudioManager.STREAM_VOICE_CALL,
+                    8000,
+                    AudioFormat.CHANNEL_OUT_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    minBufferSize,
+                    AudioTrack.MODE_STREAM,
+                )
             audioTrack.play()
 
-            val decoder = MediaCodec.createDecoderByType("audio/3gpp")
-            val mediaFormat = MediaFormat.createAudioFormat("audio/3gpp", 8000, 1)
+            val decoder = MediaCodec.createDecoderByType("audio/g711-mlaw")
+            val mediaFormat = MediaFormat.createAudioFormat("audio/g711-mlaw", 8000, 1)
             decoder.configure(mediaFormat, null, null, 0)
             decoder.start()
 
             var receivedCount = 0
-            while(true) {
+            while (true) {
                 if (callStopped.get() || callGeneration.get() != gen) break
                 val dgramBuf = ByteArray(2048)
                 val dgram = DatagramPacket(dgramBuf, dgramBuf.size)
@@ -1459,39 +1636,39 @@ a=sendrecv
                     Rlog.d(TAG, "Received RTP packet #$receivedCount: length=${dgram.length} pt=$pt ft=$ft")
                 }
 
-                if(ft.toInt() != 7) continue
+                if (ft.toInt() != 7) continue
 
                 // RTP header 12 byte
-                // AMR in RTP header 10 bits
+                // PCMU in RTP header 10 bits
                 // Packet size 32, FT=7
                 val baOs = ByteArrayOutputStream()
 
-                baOs.write( ft.toInt() shl 3)
+                baOs.write(ft.toInt() shl 3)
 
                 var m = 0
                 // Warning: we should take good care counting the **bits** of the packet based on FT
-                for(i in 13 until dgram.length ) {
+                for (i in 13 until dgram.length) {
                     // Take 6 bits left, 2 bits right
-                    val left = (dgramBuf[i].toUByte().toUInt().toInt() and 0x3f)  shl 2
-                    val right = (dgramBuf[i + 1 ].toUByte().toUInt().toInt() shr 6) and 0x3
+                    val left = (dgramBuf[i].toUByte().toUInt().toInt() and 0x3f) shl 2
+                    val right = (dgramBuf[i + 1].toUByte().toUInt().toInt() shr 6) and 0x3
                     m++
                     baOs.write(left or right)
                 }
-                //Rlog.d(TAG, "Received RTP data of length ${dgram.length} $m")
+                // Rlog.d(TAG, "Received RTP data of length ${dgram.length} $m")
 
                 val inBufIndex = decoder.dequeueInputBuffer(-1)
-                //Rlog.d(TAG, "Got decoding input buffer $inBufIndex")
+                // Rlog.d(TAG, "Got decoding input buffer $inBufIndex")
                 val inBuf = decoder.getInputBuffer(inBufIndex)!!
                 val data = baOs.toByteArray()
                 inBuf.clear()
                 inBuf.put(data)
                 decoder.queueInputBuffer(inBufIndex, 0, data.size, 0, 0)
 
-                //TODO: Support DTX (comfort noise frames that don't repeat)
-                //TODO: Can we receive multiple outs per in?
+                // TODO: Support DTX (comfort noise frames that don't repeat)
+                // TODO: Can we receive multiple outs per in?
                 val outBufInfo = MediaCodec.BufferInfo()
                 val outBufIndex = decoder.dequeueOutputBuffer(outBufInfo, 0)
-                //Rlog.d(TAG, "Got decoding output buffer $outBufIndex")
+                // Rlog.d(TAG, "Got decoding output buffer $outBufIndex")
                 if (outBufIndex >= 0) {
                     val outBuf = decoder.getOutputBuffer(outBufIndex)!!
                     audioTrack.write(outBuf, outBufInfo.size, AudioTrack.WRITE_BLOCKING)
@@ -1518,6 +1695,7 @@ a=sendrecv
 
     val prAckWaitLock = Object()
     var prAckWait = mutableSetOf<Int>()
+
     fun handleCall(request: SipRequest): Int {
         val contentType = request.headers["content-type"]?.get(0)
         if (contentType != "application/sdp") return 404
@@ -1538,10 +1716,15 @@ a=sendrecv
         // - 180 Ringing Notification's AudioTrack is playing, the user can hear its phone -- Note: Ringing doesn't give SDP
         // - 200 User has accepted the call
 
-        val sdp = request.body.toString(Charsets.UTF_8).split("[\r\n]+".toRegex()).toList()
+        val sdp =
+            request.body
+                .toString(Charsets.UTF_8)
+                .split("[\r\n]+".toRegex())
+                .toList()
         Rlog.d(TAG, "Split SDP into $sdp")
+
         fun sdpElement(command: String): String? {
-            val v = sdp.firstOrNull { it.startsWith("$command=")} ?: return null
+            val v = sdp.firstOrNull { it.startsWith("$command=") } ?: return null
             return v.substring(2)
         }
         val sdpConnectionData = sdpElement("c")
@@ -1553,60 +1736,66 @@ a=sendrecv
 
         Rlog.d(TAG, "Got sdpTiming $sdpTiming")
 
-        if (sdpTiming != "0 0")
+        if (sdpTiming != "0 0") {
             Rlog.d(TAG, "Uh-oh, unknown timing mode")
+        }
 
-
-        val rtpRemote = sdpConnectionData!!.split(" ")[2] //c=IN IP6 xxx
+        val rtpRemote = sdpConnectionData!!.split(" ")[2] // c=IN IP6 xxx
         val rtpRemoteAddr = InetAddress.getByName(rtpRemote)
-        val rtpRemotePort = sdpMedia!!.split(" ")[1] //m=audio 30798 RTP/AVP 96 97 98 8 18 101 100 99
+        val rtpRemotePort = sdpMedia!!.split(" ")[1] // m=audio 30798 RTP/AVP 96 97 98 8 18 101 100 99
 
-        val attributes = sdp.filter { it.startsWith("a=") }.map { it.substring(2)}
+        val attributes = sdp.filter { it.startsWith("a=") }.map { it.substring(2) }
 
-        fun lookTrackMatching(codec: String, additional: String = "", notAdditional: String = ""): Pair<Int,String>? {
-            //TODO: also match on fmtp
+        fun lookTrackMatching(
+            codec: String,
+            additional: String = "",
+            notAdditional: String = "",
+        ): Pair<Int, String>? {
+            // TODO: also match on fmtp
             val maps = attributes.filter { it.startsWith("rtpmap") && it.contains(codec) }
-            val matches = maps.map { m ->
-                val track = m.split("[: ]+".toRegex())[1].toInt()
-                val desc = m
-                Pair(track, desc)
-            }
-            Rlog.d(TAG, "Matching $codec, got $matches")
-            val matches2 = if(matches.size > 1) {
-                matches.sortedBy { m ->
-                    val fmtp = attributes.filter { it.startsWith("fmtp:${m.first}") }[0]
-                    Rlog.d(TAG, "Matching $codec, for match $m got fmtp $fmtp")
-                    if(fmtp.contains(additional))
-                        0
-                    else if (notAdditional.isNotEmpty() && !fmtp.contains(notAdditional))
-                        1
-                    else
-                        2
+            val matches =
+                maps.map { m ->
+                    val track = m.split("[: ]+".toRegex())[1].toInt()
+                    val desc = m
+                    Pair(track, desc)
                 }
-            } else {
-                matches
-            }
+            Rlog.d(TAG, "Matching $codec, got $matches")
+            val matches2 =
+                if (matches.size > 1) {
+                    matches.sortedBy { m ->
+                        val fmtp = attributes.filter { it.startsWith("fmtp:${m.first}") }[0]
+                        Rlog.d(TAG, "Matching $codec, for match $m got fmtp $fmtp")
+                        if (fmtp.contains(additional)) {
+                            0
+                        } else if (notAdditional.isNotEmpty() && !fmtp.contains(notAdditional)) {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                } else {
+                    matches
+                }
             Rlog.d(TAG, "Matching2 $codec, got $matches2")
             return matches2.firstOrNull()
         }
 
-        fun trackRequirements(track: Int): String? {
-            return attributes.firstOrNull() { it.startsWith("fmtp:$track") }
-        }
+        fun trackRequirements(track: Int): String? = attributes.firstOrNull { it.startsWith("fmtp:$track") }
 
         val hasEarlyMedia = request.headers["p-early-media"]?.isNotEmpty() == true
-        val callerSupportsPrecondition = (request.headers["supported"].orEmpty() +
-                request.headers["require"].orEmpty()).any { it.contains("precondition") }
+        val callerSupportsPrecondition =
+            (
+                request.headers["supported"].orEmpty() +
+                    request.headers["require"].orEmpty()
+            ).any { it.contains("precondition") }
 
-        // Look for an AMR/8000 mode
-        // TODO: Select which one? SFR has two, one with mode-set=7 one without it. This would require reading the fmtp lines
-        val (amrTrack, amrTrackDesc) = lookTrackMatching("AMR/8000", "octet-align=0", "octet-align=1")!!
-        val amrTrackRequirements = trackRequirements(amrTrack)
+        // Look for an PCMU/8000 mode
+        val (pcmuTrack) = lookTrackMatching("PCMU/8000")!!
 
-        // Look for a DTMF track, use the 8000Hz-based one to match AMR timestamps
+        // Look for a DTMF track, use the 8000Hz-based one to match PCMU timestamps
         val (dtmfTrack, dtmfTrackDesc) = lookTrackMatching("telephone-event/8000")!!
 
-        val allTracks = listOf(amrTrack, dtmfTrack).sorted()
+        val allTracks = listOf(pcmuTrack, dtmfTrack).sorted()
         // destination is sip:<owner>@realm, extract owner
         val owner = request.destination.substringAfter("sip:").substringBefore("@")
 
@@ -1616,19 +1805,25 @@ a=sendrecv
             val rtpSocket = DatagramSocket(0, localAddr)
             network.bindSocket(rtpSocket)
             rtpSocket.connect(rtpRemoteAddr, rtpRemotePort.toInt())
-            Rlog.d(TAG, "RTP socket created: local=${rtpSocket.localAddress}:${rtpSocket.localPort}, remote=${rtpSocket.inetAddress}:${rtpSocket.port}")
+            Rlog.d(
+                TAG,
+                "RTP socket created: local=${rtpSocket.localAddress}:${rtpSocket.localPort}, remote=${rtpSocket.inetAddress}:${rtpSocket.port}",
+            )
 
             val local =
-                if(socket.gLocalAddr() is Inet6Address)
+                if (socket.gLocalAddr() is Inet6Address) {
                     "[${socket.gLocalAddr().hostAddress}]:${serverSocket.localPort}"
-                else
+                } else {
                     "${socket.gLocalAddr().hostAddress}:${serverSocket.localPort}"
+                }
             val sipInstance = "<urn:gsma:imei:${imei.substring(0,8)}-${imei.substring(8,14)}-0>"
             val contactTel =
                 """<sip:$myTel@$local;transport=tcp>;expires=600000;+sip.instance="$sipInstance";+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mmtel";+g.3gpp.smsip;audio"""
             val mySeqCounter = reliableSequenceCounter++
-            val ipType = if(socket.gLocalAddr() is Inet6Address) "IP6" else "IP4"
-            val mySdp = ("""
+            val ipType = if (socket.gLocalAddr() is Inet6Address) "IP6" else "IP4"
+            val mySdp =
+                (
+                    """
 v=0
 o=$owner 1 2 IN $ipType ${socket.gLocalAddr().hostAddress}
 s=phh voice call
@@ -1641,29 +1836,36 @@ m=audio ${rtpSocket.localPort} RTP/AVP ${allTracks.joinToString(" ")}
 b=AS:38
 b=RS:0
 b=RR:0
-a=$amrTrackDesc
 a=ptime:20
 a=maxptime:240
 a=$dtmfTrackDesc
-a=fmtp:$amrTrack mode-set=7;octet-align=0;max-red=0
+a=fmtp:$pcmuTrack mode-set=7;octet-align=0;max-red=0
 a=fmtp:$dtmfTrack 0-15
-${if (callerSupportsPrecondition) """
+${if (callerSupportsPrecondition) {
+                        """
 a=curr:qos local none
 a=curr:qos remote none
 a=des:qos mandatory local sendrecv
 a=des:qos mandatory remote sendrecv
-a=conf:qos remote sendrecv""".trimIndent() else ""}
+a=conf:qos remote sendrecv
+                        """.trimIndent()
+                    } else {
+                        ""
+                    }}
 a=sendrecv
-                       """.trim()).toByteArray()
+                       """.trim()
+                ).toByteArray()
 
             // Generate a single local tag for all responses in this dialog (RFC 3261 §12.1.1)
             val localToTag = randomBytes(6).toHex()
-            val toWithTag = request.headers["to"]!!.map { h ->
-                if (h.contains(";tag=")) h else "$h;tag=$localToTag"
-            }
+            val toWithTag =
+                request.headers["to"]!!.map { h ->
+                    if (h.contains(";tag=")) h else "$h;tag=$localToTag"
+                }
 
-            val myHeaders = commonHeaders + //Require: precondition
-                """
+            val myHeaders =
+                commonHeaders + // Require: precondition
+                    """
                         Contact: $contactTel
                         Allow: INVITE, ACK, CANCEL, BYE, UPDATE, REFER, NOTIFY, INFO, MESSAGE, PRACK, OPTIONS
                         Content-Type: application/sdp
@@ -1671,24 +1873,24 @@ a=sendrecv
                         RSeq: $mySeqCounter
                         P-Access-Network-Info: 3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=20810b8c49752501
                         """.toSipHeadersMap() +
-                            request.headers.filter { (k, _) -> k in listOf("cseq", "via", "from", "to", "call-id") } +
-                            mapOf("to" to toWithTag) -
-                "route" - "security-verify"
+                    request.headers.filter { (k, _) -> k in listOf("cseq", "via", "from", "to", "call-id") } +
+                    mapOf("to" to toWithTag) -
+                    "route" - "security-verify"
 
-            currentCall = Call(
-                outgoing = false,
-                amrTrack = amrTrack,
-                amrTrackDesc = amrTrackDesc,
-                dtmfTrack = dtmfTrack,
-                dtmfTrackDesc = dtmfTrackDesc,
-                callHeaders = myHeaders - "require" - "content-type" + "Supported: 100rel, replaces, timer".toSipHeadersMap(),
-                rtpRemoteAddr = rtpRemoteAddr,
-                rtpRemotePort = rtpRemotePort.toInt(),
-                rtpSocket =  rtpSocket,
-                sdp = mySdp,
-                hasEarlyMedia = hasEarlyMedia,
-                remoteContact = extractDestinationFromContact(request.headers["contact"]!![0]),
-            )
+            currentCall =
+                Call(
+                    outgoing = false,
+                    pcmuTrack = pcmuTrack,
+                    dtmfTrack = dtmfTrack,
+                    dtmfTrackDesc = dtmfTrackDesc,
+                    callHeaders = myHeaders - "require" - "content-type" + "Supported: 100rel, replaces, timer".toSipHeadersMap(),
+                    rtpRemoteAddr = rtpRemoteAddr,
+                    rtpRemotePort = rtpRemotePort.toInt(),
+                    rtpSocket = rtpSocket,
+                    sdp = mySdp,
+                    hasEarlyMedia = hasEarlyMedia,
+                    remoteContact = extractDestinationFromContact(request.headers["contact"]!![0]),
+                )
 
             if (threadsStarted.compareAndSet(false, true)) {
                 callDecodeThread()
@@ -1704,15 +1906,16 @@ a=sendrecv
                         statusCode = 183,
                         statusString = "Session Progress",
                         headersParam = myHeaders,
-                        body = mySdp
+                        body = mySdp,
                     )
                 Rlog.d(TAG, "Sending $msg")
                 synchronized(socket.gWriter()) { socket.gWriter().write(msg.toByteArray()) }
                 waitPrack(mySeqCounter)
             }
             if (!hasEarlyMedia) {
-                val myHeaders2 = myHeaders - "rseq" - "content-type" - "require" +
-                    """
+                val myHeaders2 =
+                    myHeaders - "rseq" - "content-type" - "require" +
+                        """
 Supported: 100rel, replaces, timer
 P-Access-Network-Info: 3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=4500620f331a5e06
 
@@ -1721,7 +1924,7 @@ P-Access-Network-Info: 3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=4500620f331a5e06
                     SipResponse(
                         statusCode = 180,
                         statusString = "Ringing",
-                        headersParam = myHeaders2
+                        headersParam = myHeaders2,
                     )
                 Rlog.d(TAG, "Sending $msg2")
                 synchronized(socket.gWriter()) { socket.gWriter().write(msg2.toByteArray()) }
@@ -1729,8 +1932,9 @@ P-Access-Network-Info: 3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=4500620f331a5e06
         }
 
         // Next step is 180 Ringing, handled in the thread
-        if (!hasEarlyMedia)
+        if (!hasEarlyMedia) {
             return 0
+        }
         return 100
     }
 
@@ -1761,21 +1965,26 @@ P-Access-Network-Info: 3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=4500620f331a5e06
                 smsHeadersMap[token] = smsHeaders(dest, callId, cseq)
                 try {
                     receivedCb(token, "3gpp", sms.pdu!!)
-                } catch(t: Throwable) {
-                    Rlog.d(TAG, "Failed sending SMS to framework", t);
+                } catch (t: Throwable) {
+                    Rlog.d(TAG, "Failed sending SMS to framework", t)
                 }
             }
+
             SmsType.RP_ACK_FROM_NETWORK -> {
                 try {
                     onSmsStatusReportReceived?.invoke(sms.ref.toInt(), "3gpp", ByteArray(2))
-                } catch(t: Throwable) {
+                } catch (t: Throwable) {
                     Rlog.d(TAG, "Failed sending SMS ACK to framework", t)
                 }
             }
+
             SmsType.RP_ERROR_FROM_NETWORK -> {
                 Rlog.d(TAG, "SMS error from network")
             }
-            else -> return 500
+
+            else -> {
+                return 500
+            }
         }
         return 200
     }
@@ -1785,30 +1994,44 @@ P-Access-Network-Info: 3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=4500620f331a5e06
         pdu: ByteArray,
         ref: Int,
         successCb: (() -> Unit),
-        failCb: (() -> Unit)
+        failCb: (() -> Unit),
     ) {
-        val decodableSmsc = try {
-            PhoneNumberUtils.numberToCalledPartyBCD(smsSmsc, PhoneNumberUtils.BCD_EXTENDED_TYPE_CALLED_PARTY); true
-        } catch (t:Throwable) { false }
+        val decodableSmsc =
+            try {
+                PhoneNumberUtils.numberToCalledPartyBCD(smsSmsc, PhoneNumberUtils.BCD_EXTENDED_TYPE_CALLED_PARTY)
+                true
+            } catch (t: Throwable) {
+                false
+            }
 
         val smsManager =
             ctxt.getSystemService(SmsManager::class.java).createForSubscriptionId(subId)
-        val smscIdentity = try {
-            val i = smsManager
-                .javaClass.getMethod("getSmscIdentity")
-                .invoke(smsManager) as Uri
-            if (i.host == null) null else i
-        } catch (t: Throwable) { null }
+        val smscIdentity =
+            try {
+                val i =
+                    smsManager
+                        .javaClass
+                        .getMethod("getSmscIdentity")
+                        .invoke(smsManager) as Uri
+                if (i.host == null) null else i
+            } catch (t: Throwable) {
+                null
+            }
         Rlog.d(TAG, "Got smscIdentity $smscIdentity")
         // make ref up?
         val smsc =
-            if (smsSmsc != null && decodableSmsc) smsSmsc
-            else if (forceSmsc != null) forceSmsc
-            else {
+            if (smsSmsc != null && decodableSmsc) {
+                smsSmsc
+            } else if (forceSmsc != null) {
+                forceSmsc
+            } else {
                 try {
-                    Rlog.d(TAG, "Got smsc $smscIdentity // host is ${smscIdentity?.host} // ${smscIdentity?.scheme} // ${smscIdentity?.path}")
+                    Rlog.d(
+                        TAG,
+                        "Got smsc $smscIdentity // host is ${smscIdentity?.host} // ${smscIdentity?.scheme} // ${smscIdentity?.path}",
+                    )
                     smscIdentity!!.host!!
-                } catch(t: Throwable) {
+                } catch (t: Throwable) {
                     try {
                         Rlog.d(TAG, "getSmscIdentity failed", t)
                         val smscStr = smsManager.smscAddress
@@ -1816,7 +2039,7 @@ P-Access-Network-Info: 3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=4500620f331a5e06
                         Rlog.d(TAG, "Got smsc $smscStr, match ${smscMatchRegex.find(smscStr!!)}")
                         val match = smscMatchRegex.find(smscStr!!)!!
                         match.groupValues[1]
-                    } catch(t: Throwable) {
+                    } catch (t: Throwable) {
                         Rlog.d(TAG, "smscAddress failed", t)
                         null
                     }
@@ -1824,13 +2047,14 @@ P-Access-Network-Info: 3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=4500620f331a5e06
             }
 
         // smsc
-        val data = SipSmsEncodeSms(ref.toByte(), if(smsc == null) "" else "+$smsc", pdu)
+        val data = SipSmsEncodeSms(ref.toByte(), if (smsc == null) "" else "+$smsc", pdu)
         Rlog.d(TAG, "sending sms ${data.toHex()} to smsc $smsc")
         val dest =
-            if(smscIdentity != null)
+            if (smscIdentity != null) {
                 "sip:$smscIdentity"
-            else
+            } else {
                 "sip:+$smsc@$realm"
+            }
 
         // "sip:ipsmgw.lte-lguplus.co.kr",
         val msg =
@@ -1852,7 +2076,7 @@ P-Access-Network-Info: 3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=4500620f331a5e06
                     Accept-Contact: *;+g.3gpp.smsip;require;explicit
                     Request-Disposition: no-fork
                     """.toSipHeadersMap(),
-                data
+                data,
             )
         setResponseCallback(
             msg.headers["call-id"]!![0],
@@ -1863,13 +2087,17 @@ P-Access-Network-Info: 3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=4500620f331a5e06
                     failCb()
                 }
                 true
-            }
+            },
         )
         Rlog.d(TAG, "Sending $msg")
         synchronized(socket.gWriter()) { socket.gWriter().write(msg.toByteArray()) }
     }
 
-    fun sendSmsAck(token: Int, ref: Int, error: Boolean): Unit {
+    fun sendSmsAck(
+        token: Int,
+        ref: Int,
+        error: Boolean,
+    ) {
         Rlog.d(TAG, "sending sms ack")
         val body = SipSmsEncodeAck(ref.toByte())
         val headers = smsHeadersMap.remove(token)
@@ -1898,7 +2126,7 @@ P-Access-Network-Info: 3GPP-E-UTRAN-FDD;utran-cell-id-3gpp=4500620f331a5e06
                     Request-Disposition: no-fork
                     Accept-Contact: *;+g.3gpp.smsip
                     """.toSipHeadersMap(),
-                body
+                body,
             )
         // ignore response
         setResponseCallback(msg.headers["call-id"]!![0], { true })

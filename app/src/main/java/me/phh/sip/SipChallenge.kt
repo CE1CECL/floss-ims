@@ -1,15 +1,22 @@
-//SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0
 package me.phh.sip
 
 import android.telephony.Rlog
 import android.telephony.TelephonyManager
 import android.util.Base64
 
-data class SipAkaResult(val res: ByteArray, val ck: ByteArray, val ik: ByteArray)
+data class SipAkaResult(
+    val res: ByteArray,
+    val ck: ByteArray,
+    val ik: ByteArray,
+)
 
 private const val TAG = "PHH SipChallenge"
 
-fun sipAkaChallenge(tm: TelephonyManager, nonceB64: String): SipAkaResult {
+fun sipAkaChallenge(
+    tm: TelephonyManager,
+    nonceB64: String,
+): SipAkaResult {
     val nonce = Base64.decode(nonceB64, Base64.DEFAULT)
 
     val rand = nonce.take(16)
@@ -26,7 +33,7 @@ fun sipAkaChallenge(tm: TelephonyManager, nonceB64: String): SipAkaResult {
         tm.getIccAuthentication(
             TelephonyManager.APPTYPE_USIM,
             TelephonyManager.AUTHTYPE_EAP_AKA,
-            challenge
+            challenge,
         )
     val response = Base64.decode(responseB64, Base64.DEFAULT)
     if (response[0] != (0xdb).toByte()) {
@@ -62,7 +69,7 @@ data class SipAkaDigestSess(
     val uri: String,
     val nonceB64: String,
     val opaque: String?,
-    private val akaResult: SipAkaResult
+    private val akaResult: SipAkaResult,
 ) {
     var nonceCount: String = "0"
     var cnonce: String = ""
@@ -93,7 +100,7 @@ data class SipAkaDigest(
     val uri: String,
     val nonceB64: String,
     val opaque: String?,
-    private val akaResult: SipAkaResult
+    private val akaResult: SipAkaResult,
 ) {
     private val H1 = ("$user:$realm:".toByteArray() + akaResult.res).toMD5()
     private val H2 = "REGISTER:$uri".toMD5()

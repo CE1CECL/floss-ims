@@ -1,4 +1,4 @@
-//SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0
 package me.phh.sip
 
 import android.net.IpSecManager
@@ -24,20 +24,27 @@ import java.nio.channels.SelectionKey
 import java.nio.channels.Selector
 import java.nio.channels.spi.SelectorProvider
 
-/* wrapper around sockets + establish ipsec tunnel given ipsec helpers */
+// wrapper around sockets + establish ipsec tunnel given ipsec helpers
 interface SipConnection {
     fun close()
+
     fun enableIpsec(
         ipSecBuilder: IpSecTransform.Builder,
         ipSecManager: IpSecManager,
         clientSpiC: IpSecManager.SecurityParameterIndex,
-        serverSpiS: IpSecManager.SecurityParameterIndex
+        serverSpiS: IpSecManager.SecurityParameterIndex,
     )
+
     fun gLocalAddr(): InetAddress
+
     fun connect(remotePort: Int)
+
     fun gWriter(): OutputStream
+
     fun gReader(): SipReader
+
     fun gLocalPort(): Int
+
     fun getChannel(): SelectableChannel
 }
 
@@ -45,15 +52,17 @@ class SipConnectionTcp(
     val network: Network,
     val remoteAddr: InetAddress,
     val _localAddr: InetAddress? = null,
-    val _localPort: Int = 0
+    val _localPort: Int = 0,
 ) : SipConnection {
     val socket: Socket
-    /* redefine public localAddr/port for when not specified in argument */
+
+    // redefine public localAddr/port for when not specified in argument
     var localAddr: InetAddress
     var localPort: Int
     var remotePort: Int = 0
     lateinit var writer: OutputStream
     lateinit var reader: SipReader
+
     // we need to keep the transform around or the ipsec transform
     // gets destroyed while still in use
     lateinit var inTransform: IpSecTransform
@@ -82,21 +91,13 @@ class SipConnectionTcp(
         connected = true
     }
 
-    override fun gWriter(): OutputStream {
-        return writer
-    }
+    override fun gWriter(): OutputStream = writer
 
-    override fun gReader(): SipReader {
-        return reader
-    }
+    override fun gReader(): SipReader = reader
 
-    override fun gLocalPort(): Int {
-        return localPort
-    }
+    override fun gLocalPort(): Int = localPort
 
-    override fun getChannel(): SelectableChannel {
-        return socket.channel
-    }
+    override fun getChannel(): SelectableChannel = socket.channel
 
     override fun close() {
         socket.close()
@@ -106,7 +107,7 @@ class SipConnectionTcp(
         ipSecBuilder: IpSecTransform.Builder,
         ipSecManager: IpSecManager,
         clientSpiC: IpSecManager.SecurityParameterIndex,
-        serverSpiS: IpSecManager.SecurityParameterIndex
+        serverSpiS: IpSecManager.SecurityParameterIndex,
     ) {
         // Can only do this before connecting?
         check(!connected)
@@ -116,16 +117,14 @@ class SipConnectionTcp(
         ipSecManager.applyTransportModeTransform(socket, IpSecManager.DIRECTION_OUT, outTransform)
     }
 
-    override fun gLocalAddr(): InetAddress {
-        return localAddr
-    }
+    override fun gLocalAddr(): InetAddress = localAddr
 }
 
 class SipConnectionTcpServer(
     val network: Network,
     val remoteAddr: InetAddress,
     val localAddr: InetAddress,
-    val localPort: Int
+    val localPort: Int,
 ) {
     val serverSocket: ServerSocket
     val serverSocketFd: FileDescriptor
@@ -149,25 +148,23 @@ class SipConnectionTcpServer(
     fun enableIpsec(
         ipSecManager: IpSecManager,
         inTransform: IpSecTransform,
-        outTransform: IpSecTransform
+        outTransform: IpSecTransform,
     ) {
         this.inTransform = inTransform
         ipSecManager.applyTransportModeTransform(
             serverSocketFd,
             IpSecManager.DIRECTION_IN,
-            inTransform
+            inTransform,
         )
         this.outTransform = outTransform
         ipSecManager.applyTransportModeTransform(
             serverSocketFd,
             IpSecManager.DIRECTION_OUT,
-            outTransform
+            outTransform,
         )
     }
 
-    fun getChannel(): SelectableChannel {
-        return serverSocket.channel
-    }
+    fun getChannel(): SelectableChannel = serverSocket.channel
 }
 
 class SipConnectionUdp(
@@ -177,12 +174,14 @@ class SipConnectionUdp(
     val _localPort: Int = 0,
 ) : SipConnection {
     val socket: DatagramSocket
-    /* redefine public localAddr/port for when not specified in argument */
+
+    // redefine public localAddr/port for when not specified in argument
     var localAddr: InetAddress
     var localPort: Int
     var remotePort: Int = 0
     lateinit var writer: OutputStream
     lateinit var reader: SipReader
+
     // we need to keep the transform around or the ipsec transform
     // gets destroyed while still in use
     lateinit var inTransform: IpSecTransform
@@ -190,7 +189,7 @@ class SipConnectionUdp(
     var connected = false
 
     init {
-        val channel = DatagramChannel.open(if(remoteAddr is Inet6Address) StandardProtocolFamily.INET6 else StandardProtocolFamily.INET)
+        val channel = DatagramChannel.open(if (remoteAddr is Inet6Address) StandardProtocolFamily.INET6 else StandardProtocolFamily.INET)
         if (_localAddr != null) {
             channel.bind(InetSocketAddress(_localAddr, _localPort))
         }
@@ -204,70 +203,69 @@ class SipConnectionUdp(
     override fun connect(_remotePort: Int) {
         remotePort = _remotePort
         // Note: DO NOT connect, because the answers might come back from a different IP than where we sent to
-        //socket.connect(InetSocketAddress(remoteAddr, remotePort))
+        // socket.connect(InetSocketAddress(remoteAddr, remotePort))
         if (_localAddr == null) {
             // localAddr/Port only valid after connect if no explicit bind
             localAddr = socket.localAddress
             localPort = socket.localPort
         }
-        writer = object: OutputStream() {
-            override fun write(p0: Int) {
-                write(byteArrayOf(p0.toByte()))
-            }
-            override fun write(p0: ByteArray) {
-                // Send using the datagram channel
-                socket.channel.send(ByteBuffer.wrap(p0), InetSocketAddress(remoteAddr, remotePort))
-            }
-        }
-        reader = object: InputStream() {
-            val currentDgram = DatagramPacket(ByteArray(128*1024), 128*1024)
-            var currentPosition = 0
-            var currentSize = 0
-
-            fun recvPacket() {
-                // select()
-                select(listOf(getChannel()))
-                socket.receive(currentDgram)
-                currentPosition = 0
-                currentSize = currentDgram.length
-            }
-
-            override fun read(): Int {
-                if (currentPosition >= currentSize) {
-                    recvPacket()
+        writer =
+            object : OutputStream() {
+                override fun write(p0: Int) {
+                    write(byteArrayOf(p0.toByte()))
                 }
-                val ret =  currentDgram.data[currentPosition++].toInt()
-                return ret
-            }
 
-            override fun read(b: ByteArray, off: Int, len: Int): Int {
-                if (currentPosition >= currentSize) {
-                    recvPacket()
+                override fun write(p0: ByteArray) {
+                    // Send using the datagram channel
+                    socket.channel.send(ByteBuffer.wrap(p0), InetSocketAddress(remoteAddr, remotePort))
                 }
-                val toRead = minOf(len, currentSize - currentPosition)
-                currentDgram.data.copyInto(b, off, currentPosition, currentPosition + toRead)
-                currentPosition += toRead
-                return toRead
             }
-        }.sipReader()
+        reader =
+            object : InputStream() {
+                val currentDgram = DatagramPacket(ByteArray(128 * 1024), 128 * 1024)
+                var currentPosition = 0
+                var currentSize = 0
+
+                fun recvPacket() {
+                    // select()
+                    select(listOf(getChannel()))
+                    socket.receive(currentDgram)
+                    currentPosition = 0
+                    currentSize = currentDgram.length
+                }
+
+                override fun read(): Int {
+                    if (currentPosition >= currentSize) {
+                        recvPacket()
+                    }
+                    val ret = currentDgram.data[currentPosition++].toInt()
+                    return ret
+                }
+
+                override fun read(
+                    b: ByteArray,
+                    off: Int,
+                    len: Int,
+                ): Int {
+                    if (currentPosition >= currentSize) {
+                        recvPacket()
+                    }
+                    val toRead = minOf(len, currentSize - currentPosition)
+                    currentDgram.data.copyInto(b, off, currentPosition, currentPosition + toRead)
+                    currentPosition += toRead
+                    return toRead
+                }
+            }.sipReader()
         connected = true
     }
 
-    override fun gWriter(): OutputStream {
-        return writer
-    }
+    override fun gWriter(): OutputStream = writer
 
-    override fun gReader(): SipReader {
-        return reader
-    }
+    override fun gReader(): SipReader = reader
 
-    override fun gLocalPort(): Int {
-        return localPort
-    }
+    override fun gLocalPort(): Int = localPort
 
-    override fun getChannel(): SelectableChannel {
-        return socket.channel
-    }
+    override fun getChannel(): SelectableChannel = socket.channel
 
     override fun close() {
         socket.close()
@@ -277,7 +275,7 @@ class SipConnectionUdp(
         ipSecBuilder: IpSecTransform.Builder,
         ipSecManager: IpSecManager,
         clientSpiC: IpSecManager.SecurityParameterIndex,
-        serverSpiS: IpSecManager.SecurityParameterIndex
+        serverSpiS: IpSecManager.SecurityParameterIndex,
     ) {
         // Can only do this before connecting?
         check(!connected)
@@ -287,23 +285,22 @@ class SipConnectionUdp(
         ipSecManager.applyTransportModeTransform(socket, IpSecManager.DIRECTION_OUT, outTransform)
     }
 
-    override fun gLocalAddr(): InetAddress {
-        return localAddr
-    }
+    override fun gLocalAddr(): InetAddress = localAddr
 }
 
 class SipConnectionUdpServer(
     val network: Network,
     val remoteAddr: InetAddress,
     val localAddr: InetAddress,
-    val localPort: Int) {
-
+    val localPort: Int,
+) {
     val socket: DatagramSocket
-    val socketFd : FileDescriptor
+    val socketFd: FileDescriptor
     lateinit var inTransform: IpSecTransform
     lateinit var outTransform: IpSecTransform
+
     init {
-        val channel = DatagramChannel.open(if(remoteAddr is Inet6Address) StandardProtocolFamily.INET6 else StandardProtocolFamily.INET)
+        val channel = DatagramChannel.open(if (remoteAddr is Inet6Address) StandardProtocolFamily.INET6 else StandardProtocolFamily.INET)
         channel.bind(InetSocketAddress(localAddr, localPort))
         socket = channel.socket()
         network.bindSocket(socket)
@@ -313,8 +310,8 @@ class SipConnectionUdpServer(
     }
 
     fun gReader(): SipReader {
-        return object: InputStream() {
-            val currentDgram = DatagramPacket(ByteArray(128*1024), 128*1024)
+        return object : InputStream() {
+            val currentDgram = DatagramPacket(ByteArray(128 * 1024), 128 * 1024)
             var currentPosition = 0
             var currentSize = 0
 
@@ -334,7 +331,11 @@ class SipConnectionUdpServer(
                 return ret
             }
 
-            override fun read(b: ByteArray, off: Int, len: Int): Int {
+            override fun read(
+                b: ByteArray,
+                off: Int,
+                len: Int,
+            ): Int {
                 if (currentPosition >= currentSize) {
                     recvPacket()
                 }
@@ -349,25 +350,23 @@ class SipConnectionUdpServer(
     fun enableIpsec(
         ipSecManager: IpSecManager,
         inTransform: IpSecTransform,
-        outTransform: IpSecTransform
+        outTransform: IpSecTransform,
     ) {
         this.inTransform = inTransform
         ipSecManager.applyTransportModeTransform(
             socketFd,
             IpSecManager.DIRECTION_IN,
-            inTransform
+            inTransform,
         )
         this.outTransform = outTransform
         ipSecManager.applyTransportModeTransform(
             socketFd,
             IpSecManager.DIRECTION_OUT,
-            outTransform
+            outTransform,
         )
     }
 
-    fun getChannel(): SelectableChannel {
-        return socket.channel
-    }
+    fun getChannel(): SelectableChannel = socket.channel
 }
 
 fun select(channels: List<SelectableChannel>): Int {

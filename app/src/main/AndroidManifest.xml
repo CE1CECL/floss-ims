@@ -2,8 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="me.phh.ims"
     coreApp="true"
-    android:persistent="true"
-    android:sharedUserId="android.uid.system">
+    android:persistent="true">
 
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 

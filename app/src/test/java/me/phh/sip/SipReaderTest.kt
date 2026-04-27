@@ -1,38 +1,43 @@
-//SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0
 package me.phh.sip
 
 import org.junit.Test
 
 val simple =
-    ("""
-    line1
-    line2
-    """.trimIndent().replace("\n", "\r\n") + "\r\n\r\n").toByteArray()
+    (
+        """
+        line1
+        line2
+        """.trimIndent().replace("\n", "\r\n") + "\r\n\r\n"
+    ).toByteArray()
 
 val lineContinuation =
-    ("""
-    line1
-       line2 continued
-    """.trimIndent().replace("\n", "\r\n") + "\r\n\r\n")
-        .toByteArray()
+    (
+        """
+        line1
+           line2 continued
+        """.trimIndent().replace("\n", "\r\n") + "\r\n\r\n"
+    ).toByteArray()
 
 val multipleMessages =
-    ("""
-    line1
-    line2
+    (
+        """
+        line1
+        line2
 
-    line1 again
-    """.trimIndent().replace("\n", "\r\n") +
-            "\r\n\r\n")
-        .toByteArray()
+        line1 again
+        """.trimIndent().replace("\n", "\r\n") +
+            "\r\n\r\n"
+    ).toByteArray()
 
 val binaryData = (0..255).toList().map { it.toByte() }.toByteArray()
 val trailingData =
-    ("""
-    line1
-    line2
-    """.trimIndent().replace("\n", "\r\n") + "\r\n\r\n")
-        .toByteArray() + binaryData
+    (
+        """
+        line1
+        line2
+        """.trimIndent().replace("\n", "\r\n") + "\r\n\r\n"
+    ).toByteArray() + binaryData
 
 class SipReaderTests {
     @Test

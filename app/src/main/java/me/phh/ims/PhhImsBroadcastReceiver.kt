@@ -1,4 +1,4 @@
-//SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0
 package me.phh.ims
 
 import android.content.BroadcastReceiver
@@ -17,7 +17,10 @@ class PhhImsBroadcastReceiver : BroadcastReceiver() {
 
     val ALARM_PERIODIC_REGISTER = "me.phh.ims.ALARM_PERIODIC_REGISTER"
 
-    override fun onReceive(ctxt: Context, intent: Intent) {
+    override fun onReceive(
+        ctxt: Context,
+        intent: Intent,
+    ) {
         Rlog.d(TAG, "Alarm fired with ${intent.action}")
         if (intent.action == ALARM_PERIODIC_REGISTER) {
             val imsService = PhhImsService.Companion.instance!!

@@ -1,4 +1,4 @@
-//SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0
 package me.phh.sip
 
 import android.telephony.Rlog
@@ -15,7 +15,9 @@ import java.io.InputStream
 fun InputStream.sipReader(): SipReader = SipReader(this)
 
 @OptIn(ExperimentalStdlibApi::class)
-class SipReader(private val input: InputStream) : BufferedInputStream(input) {
+class SipReader(
+    private val input: InputStream,
+) : BufferedInputStream(input) {
     companion object {
         private const val TAG = "PHH SipReader"
     }
@@ -33,10 +35,12 @@ class SipReader(private val input: InputStream) : BufferedInputStream(input) {
         while (true) {
             when (read()) {
                 ' '.code,
-                '\t'.code -> {
+                '\t'.code,
+                -> {
                     mark(markLength)
                     continuation = true
                 }
+
                 else -> {
                     reset()
                     return continuation
@@ -67,6 +71,7 @@ class SipReader(private val input: InputStream) : BufferedInputStream(input) {
                     // so just return null
                     return null
                 }
+
                 '\n'.code -> {
                     var lineEnd = pos - 2
                     if (lineEnd >= markpos && buf[lineEnd] == '\r'.code.toByte()) lineEnd--
@@ -105,13 +110,15 @@ class SipReader(private val input: InputStream) : BufferedInputStream(input) {
 
 public fun SipReader.lineSequence(): Sequence<String> = LinesSequence(this).constrainOnce()
 
-private class LinesSequence(private val reader: SipReader) : Sequence<String> {
-    override public fun iterator(): Iterator<String> {
+private class LinesSequence(
+    private val reader: SipReader,
+) : Sequence<String> {
+    public override fun iterator(): Iterator<String> {
         return object : Iterator<String> {
             private var nextValue: String? = null
             private var done = false
 
-            override public fun hasNext(): Boolean {
+            public override fun hasNext(): Boolean {
                 if (nextValue == null && !done) {
                     nextValue = reader.readLine()
                     if (nextValue == null) done = true
@@ -119,7 +126,7 @@ private class LinesSequence(private val reader: SipReader) : Sequence<String> {
                 return nextValue != null
             }
 
-            override public fun next(): String {
+            public override fun next(): String {
                 if (!hasNext()) {
                     throw NoSuchElementException()
                 }

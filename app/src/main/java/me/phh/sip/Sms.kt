@@ -1,4 +1,4 @@
-//SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0
 package me.phh.sip
 
 import android.telephony.PhoneNumberUtils
@@ -18,7 +18,9 @@ import java.nio.ByteOrder
 
 private const val TAG = "PHH SipSms"
 
-enum class SmsType(val value: Byte) {
+enum class SmsType(
+    val value: Byte,
+) {
     RP_DATA_TO_NETWORK(0),
     RP_DATA_FROM_NETWORK(1),
     RP_ACK_TO_NETWORK(2),
@@ -56,7 +58,7 @@ fun ByteArray.SipSmsDecode(): SipSms? {
                         origAddrBuf,
                         0,
                         origAddrLen,
-                        PhoneNumberUtils.BCD_EXTENDED_TYPE_CALLED_PARTY
+                        PhoneNumberUtils.BCD_EXTENDED_TYPE_CALLED_PARTY,
                     )
                 }
 
@@ -72,7 +74,7 @@ fun ByteArray.SipSmsDecode(): SipSms? {
                         destAddrBuf,
                         0,
                         destAddrLen,
-                        PhoneNumberUtils.BCD_EXTENDED_TYPE_CALLED_PARTY
+                        PhoneNumberUtils.BCD_EXTENDED_TYPE_CALLED_PARTY,
                     )
                 }
 
@@ -85,6 +87,7 @@ fun ByteArray.SipSmsDecode(): SipSms? {
             buf.get(pdu, 1 + origAddrLen, pduLen)
             return SipSms(SmsType.RP_DATA_FROM_NETWORK, ref, pdu)
         }
+
         SmsType.RP_ACK_FROM_NETWORK.value -> {
             val ref = buf.get()
 
@@ -94,35 +97,41 @@ fun ByteArray.SipSmsDecode(): SipSms? {
             val pduLen = buf.get().toInt()
             val pdu = ByteArray(pduLen)
             buf.get(pdu, 0, pduLen)
-            */
+             */
 
             return SipSms(SmsType.RP_ACK_FROM_NETWORK, ref, null)
         }
+
         SmsType.RP_ERROR_FROM_NETWORK.value -> {
             val ref = buf.get()
 
             return SipSms(SmsType.RP_ERROR_FROM_NETWORK, ref, null)
         }
+
         // RP_ERROR_FROM_NETWORK possible
         else -> {
-            Rlog.w(TAG, "Got unhandled SMS pdu of type ${type}")
+            Rlog.w(TAG, "Got unhandled SMS pdu of type $type")
             return null
         }
     }
 }
 
-fun SipSmsEncodeSms(ref: Byte, smsc: String?, pdu: ByteArray): ByteArray {
-    /* get smsc BCD representation first to compute encoded length */
+fun SipSmsEncodeSms(
+    ref: Byte,
+    smsc: String?,
+    pdu: ByteArray,
+): ByteArray {
+    // get smsc BCD representation first to compute encoded length
     val smscBcd =
         if (smsc == null) {
             ByteArray(0)
         } else {
             PhoneNumberUtils.numberToCalledPartyBCD(
                 smsc,
-                PhoneNumberUtils.BCD_EXTENDED_TYPE_CALLED_PARTY
+                PhoneNumberUtils.BCD_EXTENDED_TYPE_CALLED_PARTY,
             )
         }
-    /* constant overhead: rp type, ref, orig/dest/buf lengths */
+    // constant overhead: rp type, ref, orig/dest/buf lengths
     val bufLen = 5 + smscBcd.size + pdu.size
     val bufArray = ByteArray(bufLen)
     val buf = ByteBuffer.wrap(bufArray).order(ByteOrder.BIG_ENDIAN)

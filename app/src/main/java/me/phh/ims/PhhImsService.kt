@@ -1,4 +1,4 @@
-//SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0
 package me.phh.ims
 
 import android.app.AlarmManager
@@ -32,6 +32,7 @@ class PhhImsService : ImsService() {
 
         this.armPeriodicRegisterAlarm()
     }
+
     fun armPeriodicRegisterAlarm() {
         val alarmManager = this.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val intent = Intent(receiver.ALARM_PERIODIC_REGISTER)
@@ -42,13 +43,14 @@ class PhhImsService : ImsService() {
         alarmManager.setAndAllowWhileIdle(
             AlarmManager.ELAPSED_REALTIME_WAKEUP,
             SystemClock.elapsedRealtime() + 3_000_000,
-            pendingIntent
+            pendingIntent,
         )
         Rlog.d(TAG, "Alarm set")
     }
 
     // XXX one per slot id...
     var mmTelFeature: PhhMmTelFeature? = null
+
     override fun createMmTelFeature(slotId: Int): MmTelFeature {
         Rlog.d(TAG, "createMmTelFeature")
         var feature = mmTelFeature
@@ -58,6 +60,7 @@ class PhhImsService : ImsService() {
         }
         return feature
     }
+
     override fun createRcsFeature(slotId: Int): RcsFeature? {
         Rlog.d(TAG, "createRcsFeature")
         return null
@@ -79,6 +82,7 @@ class PhhImsService : ImsService() {
 
     // XXX cache one per slot id
     val imsRegistration = ImsRegistrationImplBase()
+
     override fun getRegistration(slotId: Int): ImsRegistrationImplBase {
         Rlog.d(TAG, "getRegistration $slotId")
         return imsRegistration

@@ -223,7 +223,7 @@ with Gradle you need a full `android.jar` built from AOSP sources in `app/libs/a
 and the SDK jar must have `MmTelFeature` removed to avoid duplicate class conflicts:
 
 ```sh
-zip -d ./platforms/android-33/android.jar \
+zip -d ./platforms/android-34/android.jar \
     android/telephony/ims/feature/MmTelFeature.class \
     'android/telephony/ims/feature/MmTelFeature$MmTelCapabilities.class'
 ```
